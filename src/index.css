@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 97%;
+    --foreground: 200 26% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 200 26% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 200 26% 20%;
+    --primary: 193 72% 21%; /* #0F4C5C */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 160 84% 37%; /* #10B981 */
+    --secondary-foreground: 0 0% 100%;
+    --accent: 355 90% 70%; /* #F87171 */
+    --accent-foreground: 0 0% 100%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 44%;
+    --destructive: 355 80% 36%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 16% 88%;
+    --input: 210 16% 88%;
+    --ring: 193 72% 21%;
+    --radius: 0.5rem;
+
+    /* Song Phung semantic color system */
+    --sp-primary-50: #ebf4f6;
+    --sp-primary-500: #0f4c5c;
+    --sp-primary-700: #0b3945;
+    --sp-secondary-500: #10b981;
+    --sp-secondary-700: #059669;
+    --sp-tertiary-500: #f87171;
+    --sp-tertiary-700: #be123c;
+    --sp-neutral-50: #f8fafc;
+    --sp-neutral-100: #f1f5f9;
+    --sp-neutral-200: #e2e8f0;
+    --sp-neutral-400: #94a3b8;
+    --sp-neutral-600: #475569;
+    --sp-neutral-800: #1f2937;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .app-card {
+    @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+  }
+
+  .app-input {
+    @apply rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+
+  .btn-primary {
+    @apply rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-[#0b3945];
+  }
+
+  .btn-secondary {
+    @apply rounded-md bg-secondary px-3 py-2 text-sm font-medium text-white transition hover:bg-[#059669];
+  }
+
+  .btn-danger {
+    @apply rounded-md bg-[#be123c] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#9f1239];
+  }
+
+  .btn-ghost {
+    @apply rounded-md bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200;
+  }
+
+  .history-date-input {
+    @apply h-12 min-w-[220px] rounded-xl border-2 border-primary/80 bg-white px-4 text-xl font-semibold tracking-wide text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+
+  .history-date-input::-webkit-datetime-edit {
+    color: #0f4c5c;
+  }
+
+  .history-date-input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.9;
+    border-radius: 8px;
+    padding: 2px;
+  }
+}
