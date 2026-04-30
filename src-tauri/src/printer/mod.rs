@@ -9,6 +9,8 @@ use unicode_normalization::UnicodeNormalization;
 
 #[cfg(target_os = "windows")]
 const WINDOWS_RAW_PRINT_PS1: &str = include_str!("windows_raw_print.ps1");
+#[cfg(target_os = "windows")]
+const WINDOWS_UNICODE_PRINT_PS1: &str = include_str!("windows_unicode_print.ps1");
 
 /// Tránh bật cửa sổ PowerShell/console khi gọi từ ứng dụng GUI (Cài đặt, in, …).
 #[cfg(target_os = "windows")]
@@ -24,10 +26,66 @@ fn powershell_command() -> Command {
 /// Một số máy dùng byte khác (ví dụ 47, 56); nếu vẫn sai, xem manual máy in.
 const ESC_POS_CODE_PAGE_WPC1258: u8 = 52;
 
-/// Chuẩn NFC + Windows-1258: máy in nhận byte 1-byte/code page, không phải UTF-8 thô.
+fn decode_html_numeric_entities(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'&' && i + 3 < bytes.len() && bytes[i + 1] == b'#' {
+            let mut j = i + 2;
+            let mut hex = false;
+            if j < bytes.len() && (bytes[j] == b'x' || bytes[j] == b'X') {
+                hex = true;
+                j += 1;
+            }
+            let digits_start = j;
+            while j < bytes.len() {
+                let b = bytes[j];
+                let ok = if hex {
+                    b.is_ascii_hexdigit()
+                } else {
+                    b.is_ascii_digit()
+                };
+                if !ok {
+                    break;
+                }
+                j += 1;
+            }
+
+            if j > digits_start && j < bytes.len() && bytes[j] == b';' {
+                let radix = if hex { 16 } else { 10 };
+                if let Ok(num_str) = std::str::from_utf8(&bytes[digits_start..j]) {
+                    if let Ok(code) = u32::from_str_radix(num_str, radix) {
+                        if let Some(ch) = char::from_u32(code) {
+                            out.push(ch);
+                            i = j + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(ch) = input[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    out
+}
+
+/// Chuẩn NFD + Windows-1258:
+/// - Nhiều ký tự tiếng Việt trong CP1258 được biểu diễn dạng base + dấu tổ hợp.
+/// - Nếu dùng NFC (ký tự dựng sẵn), encoder có thể fallback thành chuỗi `&#NNNN;`
+///   và máy in sẽ in literal ra giấy (lỗi như ảnh người dùng gửi).
 fn receipt_body_to_printer_bytes(content: &str) -> Vec<u8> {
-    let nfc: String = content.nfc().collect();
-    let (encoded, _enc, _had_unmappable) = WINDOWS_1258.encode(&nfc);
+    let decoded = decode_html_numeric_entities(content);
+    let nfd: String = decoded.nfd().collect();
+    let (encoded, _enc, _had_unmappable) = WINDOWS_1258.encode(&nfd);
     encoded.into_owned()
 }
 
@@ -112,16 +170,58 @@ fn is_network_target(target: &str) -> bool {
 fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // Không đưa byte ESC/POS (có byte \0 trong "ESC E 0") vào dòng lệnh PowerShell —
-        // Windows coi chuỗi lệnh là null-terminated nên gây lỗi "null byte found in provided data".
-        // Ghi file nhị phân + winspool WritePrinter (RAW) thay cho Out-Printer.
-        let bytes = receipt_print_bytes(content);
         let temp = std::env::temp_dir();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let id = format!("{}_{stamp}", std::process::id());
+        let txt_path = temp.join(format!("songphung_{id}.txt"));
+        let unicode_ps1_path = temp.join(format!("songphung_unicode_{id}.ps1"));
+
+        let windows_text = content.replace('\n', "\r\n");
+        std::fs::write(&txt_path, windows_text.as_bytes())
+            .map_err(|e| format!("Không ghi file text in tạm: {e}"))?;
+        std::fs::write(&unicode_ps1_path, WINDOWS_UNICODE_PRINT_PS1)
+            .map_err(|e| format!("Không ghi script in Unicode tạm: {e}"))?;
+
+        let txt_str = txt_path.to_str().ok_or_else(|| {
+            "Đường dẫn file text in tạm không hợp lệ (UTF-8).".to_string()
+        })?;
+        let unicode_ps1_str = unicode_ps1_path.to_str().ok_or_else(|| {
+            "Đường dẫn script in Unicode tạm không hợp lệ (UTF-8).".to_string()
+        })?;
+
+        // Ưu tiên in Unicode qua driver để đảm bảo tiếng Việt.
+        let unicode_output = powershell_command()
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                unicode_ps1_str,
+                "-Path",
+                txt_str,
+                "-Printer",
+                printer_name,
+            ])
+            .output()
+            .map_err(|e| format!("Không chạy PowerShell để in Unicode: {e}"))?;
+
+        let _ = std::fs::remove_file(&unicode_ps1_path);
+        let _ = std::fs::remove_file(&txt_path);
+        if unicode_output.status.success() {
+            return Ok(());
+        }
+
+        // Fallback RAW ESC/POS nếu driver từ chối Out-Printer.
+        let bytes = receipt_print_bytes(content);
+        let temp = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let id = format!("{}_{stamp}_raw", std::process::id());
         let prn_path = temp.join(format!("songphung_{id}.prn"));
         let ps1_path = temp.join(format!("songphung_{id}.ps1"));
 
@@ -156,11 +256,19 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
             let _ = std::fs::remove_file(&prn_path);
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let unicode_stderr = String::from_utf8_lossy(&unicode_output.stderr);
+            let unicode_stdout = String::from_utf8_lossy(&unicode_output.stdout);
             let detail = format!("{stderr}{stdout}").trim().to_string();
             return Err(if detail.is_empty() {
-                "Lệnh in máy in hệ thống thất bại.".to_string()
+                format!(
+                    "Lệnh in máy in hệ thống thất bại (Unicode và RAW).\nUnicode: {}\nRAW: thất bại.",
+                    format!("{unicode_stderr}{unicode_stdout}").trim()
+                )
             } else {
-                format!("Lệnh in máy in hệ thống thất bại: {detail}")
+                format!(
+                    "Lệnh in máy in hệ thống thất bại (Unicode và RAW).\nUnicode: {}\nRAW: {detail}",
+                    format!("{unicode_stderr}{unicode_stdout}").trim()
+                )
             });
         }
         let _ = std::fs::remove_file(&prn_path);
@@ -209,4 +317,23 @@ pub fn print_receipt_to_target(printer_name_or_ip: &str, content: &str) -> Resul
         return print_receipt_to_network(printer_name_or_ip, content);
     }
     print_receipt_to_system(printer_name_or_ip, content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_decimal_html_entities() {
+        let content = "PH&#7908;NG";
+        let decoded = decode_html_numeric_entities(content);
+        assert_eq!(decoded, "PHỤNG");
+    }
+
+    #[test]
+    fn decodes_hex_html_entities() {
+        let content = "&#x110;&#x1ECB;NH";
+        let decoded = decode_html_numeric_entities(content);
+        assert_eq!(decoded, "ĐịNH");
+    }
 }
