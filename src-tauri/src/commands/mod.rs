@@ -207,18 +207,6 @@ fn format_currency(value: f64) -> String {
     }
 }
 
-fn fit_text(text: &str, width: usize) -> String {
-    let mut out = String::new();
-    for ch in text.chars().take(width) {
-        out.push(ch);
-    }
-    let current = out.chars().count();
-    if current < width {
-        out.push_str(&" ".repeat(width - current));
-    }
-    out
-}
-
 fn compose_receipt_bill(
     history_id: i64,
     room_name: &str,
@@ -229,84 +217,149 @@ fn compose_receipt_bill(
     total_hour: f64,
     total_paid: f64,
 ) -> String {
+    use crate::printer::receipt_format as rf;
+
     let mut content = String::new();
-    content.push_str("      KARAOKE SONG PHỤNG 2\n");
-    content.push_str("373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH\n");
-    content.push_str("         ĐT: 0974 089 367\n");
-    content.push_str("\n");
-    content.push_str("         PHIẾU THANH TOÁN\n");
-    content.push_str(&format!("Phòng {room_name} ({room_name})\n"));
-    content.push_str(&format!("Thời gian: {started_at} - {ended_at}\n"));
-    content.push_str(&format!("Nhân viên: Admin   Số HĐ: {:05}\n", history_id));
-    content.push_str("--------------------------------\n");
-    content.push_str("Mặt hàng          SL   Đ.GIÁ T.TIỀN\n");
+    content.push_str(&rf::lines_wrapped_centered("KARAOKE SONG PHỤNG 2"));
+    content.push_str(&rf::lines_wrapped_centered(
+        "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
+    ));
+    content.push_str(&rf::lines_wrapped_centered("ĐT: 0974 089 367"));
+    content.push('\n');
+    content.push_str(&rf::lines_wrapped_centered("PHIẾU THANH TOÁN"));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Phòng {room_name} ({room_name})"
+    )));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Thời gian: {started_at} - {ended_at}"
+    )));
+    content.push_str(&rf::line_two_cols(
+        "Nhân viên: Admin",
+        &format!("Số HĐ: {:05}", history_id),
+    ));
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::line_item_header());
     for item in items {
-        let item_name = fit_text(&item.ten_san_pham, 16);
-        let qty = format!("{:>3}", item.so_luong);
-        let price = fit_text(&format_currency(item.don_gia), 6);
-        let amount = fit_text(&format_currency(item.thanh_tien), 7);
-        content.push_str(&format!("{item_name} {qty} {price} {amount}\n"));
+        content.push_str(&rf::lines_item_row(
+            &item.ten_san_pham,
+            item.so_luong,
+            &format_currency(item.don_gia),
+            &format_currency(item.thanh_tien),
+        ));
     }
-    content.push_str("--------------------------------\n");
-    content.push_str(&format!(
-        "TỔNG CỘNG: {:>20}\n",
-        format_currency(total_product)
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::line_total(
+        "TỔNG CỘNG:",
+        &format_currency(total_product),
     ));
-    content.push_str(&format!(
-        "TIỀN GIỜ: {:>21}\n",
-        format_currency(total_hour)
+    content.push_str(&rf::line_total("TIỀN GIỜ:", &format_currency(total_hour)));
+    content.push_str(&rf::line_total(
+        "TIỀN MẶT (đ):",
+        &format_currency(total_paid),
     ));
-    content.push_str(&format!(
-        "TIỀN MẶT (đ): {:>16}\n",
-        format_currency(total_paid)
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::lines_wrapped_centered(
+        "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
     ));
-    content.push_str("--------------------------------\n");
-    content.push_str(" HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!\n");
     content
 }
 
 fn compose_temporary_bill(data: &TemporaryBillData) -> String {
+    use crate::printer::receipt_format as rf;
+
     let mut content = String::new();
-    content.push_str("      KARAOKE SONG PHỤNG 2\n");
-    content.push_str("373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH\n");
-    content.push_str("         ĐT: 0974 089 367\n");
-    content.push_str("\n");
-    content.push_str("        PHIẾU TẠM TÍNH\n");
-    content.push_str(&format!("Phòng {} ({})\n", data.room_name, data.room_name));
-    content.push_str(&format!(
-        "Thời gian: {} - {}\n",
+    content.push_str(&rf::lines_wrapped_centered("KARAOKE SONG PHỤNG 2"));
+    content.push_str(&rf::lines_wrapped_centered(
+        "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
+    ));
+    content.push_str(&rf::lines_wrapped_centered("ĐT: 0974 089 367"));
+    content.push('\n');
+    content.push_str(&rf::lines_wrapped_centered("PHIẾU TẠM TÍNH"));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Phòng {} ({})",
+        data.room_name, data.room_name
+    )));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Thời gian: {} - {}",
         data.gio_bat_dau, data.gio_hien_tai
+    )));
+    content.push_str(&rf::line_two_cols(
+        "Nhân viên: Admin",
+        &format!("Tham chiếu: {:05}", data.lich_su_phong_id),
     ));
-    content.push_str(&format!(
-        "Nhân viên: Admin   Tham chiếu: {:05}\n",
-        data.lich_su_phong_id
+    content.push_str(&rf::lines_wrapped_centered(
+        "(Chưa thanh toán - chỉ tham khảo)",
     ));
-    content.push_str("(Chưa thanh toán - chỉ tham khảo)\n");
-    content.push_str("--------------------------------\n");
-    content.push_str("Mặt hàng          SL   Đ.GIÁ T.TIỀN\n");
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::line_item_header());
     for item in &data.items {
-        let item_name = fit_text(&item.ten_san_pham, 16);
-        let qty = format!("{:>3}", item.so_luong);
-        let price = fit_text(&format_currency(item.don_gia), 6);
-        let amount = fit_text(&format_currency(item.thanh_tien), 7);
-        content.push_str(&format!("{item_name} {qty} {price} {amount}\n"));
+        content.push_str(&rf::lines_item_row(
+            &item.ten_san_pham,
+            item.so_luong,
+            &format_currency(item.don_gia),
+            &format_currency(item.thanh_tien),
+        ));
     }
-    content.push_str("--------------------------------\n");
-    content.push_str(&format!(
-        "TỔNG CỘNG: {:>20}\n",
-        format_currency(data.tong_tien_san_pham)
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::line_total(
+        "TỔNG CỘNG:",
+        &format_currency(data.tong_tien_san_pham),
     ));
-    content.push_str(&format!(
-        "TIỀN GIỜ (tạm tính): {:>18}\n",
-        format_currency(data.tong_tien_gio)
+    content.push_str(&rf::line_total(
+        "TIỀN GIỜ (tạm tính):",
+        &format_currency(data.tong_tien_gio),
     ));
-    content.push_str(&format!(
-        "TỔNG TẠM TÍNH:      {:>18}\n",
-        format_currency(data.tong_tam_tinh)
+    content.push_str(&rf::line_total(
+        "TỔNG TẠM TÍNH:",
+        &format_currency(data.tong_tam_tinh),
     ));
-    content.push_str("--------------------------------\n");
-    content.push_str(" HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!\n");
+    content.push_str(&rf::line_sep());
+    content.push_str(&rf::lines_wrapped_centered(
+        "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
+    ));
     content
+}
+
+/// Mẫu hóa đơn minh họa K80 — dùng cho xem trước UI và lệnh in thử máy in.
+fn compose_printer_test_sample_receipt() -> String {
+    let items: Vec<HistoryOrderItem> = vec![
+        HistoryOrderItem {
+            san_pham_id: String::new(),
+            ten_san_pham: "BIA QUY NHƠN".to_string(),
+            so_luong: 12,
+            don_gia: 14_000.0,
+            thanh_tien: 168_000.0,
+        },
+        HistoryOrderItem {
+            san_pham_id: String::new(),
+            ten_san_pham: "Nước suối".to_string(),
+            so_luong: 2,
+            don_gia: 10_000.0,
+            thanh_tien: 20_000.0,
+        },
+        HistoryOrderItem {
+            san_pham_id: String::new(),
+            ten_san_pham: "Khăn lạnh".to_string(),
+            so_luong: 6,
+            don_gia: 3_000.0,
+            thanh_tien: 18_000.0,
+        },
+    ];
+    compose_receipt_bill(
+        1,
+        "P1",
+        "29/04/2026 05:46 PM",
+        "07:24 PM",
+        &items,
+        206_000.0,
+        245_000.0,
+        451_000.0,
+    )
+}
+
+#[tauri::command]
+pub fn get_sample_receipt_preview() -> String {
+    compose_printer_test_sample_receipt()
 }
 
 #[tauri::command]
@@ -1052,8 +1105,8 @@ pub async fn test_printer(printer_name_or_ip: String) -> Result<String, String> 
         return Err("Vui lòng chọn hoặc nhập máy in trước khi kiểm tra.".to_string());
     }
     crate::printer::check_printer_target_connection(target)?;
-    let content = "TEST KET NOI MAY IN SONG PHUNG... OK\n\x1b@\x07";
-    crate::printer::print_receipt_to_target(target, content)?;
+    let content = compose_printer_test_sample_receipt();
+    crate::printer::print_receipt_to_target(target, &content)?;
     Ok(format!("Đã kiểm tra thành công máy in: {target}"))
 }
 

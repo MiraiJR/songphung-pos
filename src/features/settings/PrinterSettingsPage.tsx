@@ -8,34 +8,13 @@ type Props = {
 };
 
 type TestStatus = { type: "ok" | "error"; message: string } | null;
-const RECEIPT_PREVIEW_LINES = [
-  "     KARAOKE SONG PHỤNG 2      ",
-  "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
-  "        ĐT: 0974 089 367        ",
-  "",
-  "        PHIẾU THANH TOÁN        ",
-  "        Phòng P1 (P1)           ",
-  " Thời gian: 29/04/2026 05:46 PM -",
-  "            07:24 PM            ",
-  "Nhân viên: Admin  Số HĐ: 00001  ",
-  "---------------------------------",
-  "Mặt hàng        SL  Đ.GIÁ T.TIỀN",
-  "BIA QUY NHON    12  14,000 168,000",
-  "Nước suối        2  10,000  20,000",
-  "Khăn lạnh        6   3,000  18,000",
-  "---------------------------------",
-  "TỔNG CỘNG:            206,000",
-  "TIỀN GIỜ:             245,000",
-  "TIỀN MẶT (đ):         451,000",
-  "---------------------------------",
-  "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
-].join("\n");
 
 export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Props) {
   const [systemPrinters, setSystemPrinters] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState(printerTarget);
   const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState<TestStatus>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string>("");
 
   useEffect(() => {
     setInputValue(printerTarget);
@@ -48,6 +27,17 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
         setSystemPrinters(list);
       } catch (error) {
         setStatus({ type: "error", message: `Không tải được danh sách máy in: ${String(error)}` });
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const text = await invoke<string>("get_sample_receipt_preview");
+        setReceiptPreview(text);
+      } catch {
+        setReceiptPreview("");
       }
     })();
   }, []);
@@ -151,11 +141,11 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
       <div className="app-card mx-auto mt-4 max-w-2xl p-4 text-center">
         <h3 className="text-base font-semibold text-slate-800">Xem trước hóa đơn giấy K80x45 (80mm)</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Mẫu minh họa để canh bố cục in nhiệt XPrinter (không phải dữ liệu hóa đơn thật).
+          Cùng nội dung với lệnh &quot;In thử&quot; — mẫu minh họa K80 (không phải hóa đơn thật).
         </p>
         <div className="mt-3 flex justify-center rounded-lg bg-slate-100 p-4">
-          <pre className="mx-auto block w-[80mm] overflow-x-auto bg-white p-3 text-center font-mono text-[11px] leading-4 text-slate-800 shadow">
-            {RECEIPT_PREVIEW_LINES}
+          <pre className="mx-auto block w-[80mm] overflow-x-auto bg-white p-3 text-center font-mono text-[11px] font-bold leading-4 text-slate-800 shadow">
+            {receiptPreview || "Đang tải mẫu..."}
           </pre>
         </div>
       </div>

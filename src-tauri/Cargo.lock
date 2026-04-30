@@ -3782,7 +3782,7 @@ dependencies = [
 
 [[package]]
 name = "songphung"
-version = "0.1.0"
+version = "1.0.4"
 dependencies = [
  "serde",
  "serde_json",

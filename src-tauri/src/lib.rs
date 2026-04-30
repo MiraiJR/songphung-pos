@@ -36,6 +36,7 @@ pub fn run() {
             commands::cancel_room,
             commands::checkout_room,
             commands::get_system_printers,
+            commands::get_sample_receipt_preview,
             commands::test_printer,
             commands::print_temporary_bill,
             commands::check_printer_connection,

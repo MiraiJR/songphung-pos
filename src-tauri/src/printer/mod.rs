@@ -1,15 +1,26 @@
+pub mod receipt_format;
+
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
+/// ESC/POS: init, bold on, body, bold off, feed, partial cut.
+fn receipt_print_bytes(content: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&[0x1B, 0x40]); // ESC @ init
+    bytes.extend_from_slice(&[0x1B, 0x45, 0x01]); // ESC E 1 bold on
+    bytes.extend_from_slice(content.as_bytes());
+    bytes.extend_from_slice(&[0x1B, 0x45, 0x00]); // ESC E 0 bold off
+    bytes.push(0x0A);
+    bytes.push(0x0A);
+    bytes.extend_from_slice(&[0x1D, 0x56, 0x41, 0x10]); // partial cut
+    bytes
+}
+
 pub fn print_receipt_to_network(printer_addr: &str, content: &str) -> Result<(), String> {
     let mut stream = TcpStream::connect(printer_addr).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(content.as_bytes());
-    bytes.push(0x0A);
-    bytes.push(0x0A);
-    bytes.extend_from_slice(&[0x1D, 0x56, 0x41, 0x10]);
+    let bytes = receipt_print_bytes(content);
     stream.write_all(&bytes).map_err(|e| e.to_string())
 }
 
@@ -74,7 +85,11 @@ fn is_network_target(target: &str) -> bool {
 fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let escaped_content = content.replace('\'', "''");
+        let mut payload = String::with_capacity(content.len() + 24);
+        payload.push_str("\x1B\x40\x1B\x45\x01");
+        payload.push_str(content);
+        payload.push_str("\x1B\x45\x00\n\n\x1D\x56\x41\x10");
+        let escaped_content = payload.replace('\'', "''");
         let escaped_printer = printer_name.replace('\'', "''");
         let script = format!(
             "$t = @'\n{escaped_content}\n'@; $t | Out-Printer -Name '{escaped_printer}'"
@@ -91,6 +106,7 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
 
     #[cfg(not(target_os = "windows"))]
     {
+        let bytes = receipt_print_bytes(content);
         let mut child = Command::new("lp")
             .args(["-d", printer_name, "-o", "raw"])
             .stdin(std::process::Stdio::piped())
@@ -98,7 +114,7 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
             .map_err(|e| format!("Không gọi được lệnh lp để in: {e}"))?;
         if let Some(stdin) = child.stdin.as_mut() {
             stdin
-                .write_all(content.as_bytes())
+                .write_all(&bytes)
                 .map_err(|e| format!("Không gửi được dữ liệu in: {e}"))?;
         }
         let status = child

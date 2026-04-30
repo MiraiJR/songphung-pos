@@ -38,6 +38,18 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Tên file installer lấy theo version trong tauri.conf.json / Cargo.toml — đồng bộ với tag (v1.0.4 → 1.0.4).
+      - name: Set version from git tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          echo "Release VERSION=$VERSION"
+          export VERSION
+          node scripts/sync-version.mjs
+
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
