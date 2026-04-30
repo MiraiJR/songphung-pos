@@ -1,6 +1,5 @@
 pub mod receipt_format;
 
-use encoding_rs::WINDOWS_1258;
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
@@ -8,11 +7,8 @@ use std::time::Duration;
 use unicode_normalization::UnicodeNormalization;
 
 #[cfg(target_os = "windows")]
-const WINDOWS_RAW_PRINT_PS1: &str = include_str!("windows_raw_print.ps1");
-#[cfg(target_os = "windows")]
 const WINDOWS_UNICODE_PRINT_PS1: &str = include_str!("windows_unicode_print.ps1");
 
-/// Tránh bật cửa sổ PowerShell/console khi gọi từ ứng dụng GUI (Cài đặt, in, …).
 #[cfg(target_os = "windows")]
 fn powershell_command() -> Command {
     use std::os::windows::process::CommandExt;
@@ -22,86 +18,253 @@ fn powershell_command() -> Command {
     cmd
 }
 
-/// WPC1258 (Vietnamese) — bảng ký tự thường gặp trên máy in ESC/POS (Epson/Bixolon/nhiều Xprinter).
-/// Một số máy dùng byte khác (ví dụ 47, 56); nếu vẫn sai, xem manual máy in.
 const ESC_POS_CODE_PAGE_WPC1258: u8 = 52;
 
-fn decode_html_numeric_entities(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
+// ---------------------------------------------------------------------------
+// Windows-1258 Vietnamese encoder
+// ---------------------------------------------------------------------------
+//
+// CP1258 stores Vietnamese using:
+//   A) Single-byte precomposed chars for base+modifier letters:
+//      Â(0xC2) Ê(0xCA) Ô(0xD4) Ă(0xC3) Đ(0xD0) Ơ(0xD5) Ư(0xDF)
+//      â(0xE2) ê(0xEA) ô(0xF4) ă(0xE3) đ(0xF0) ơ(0xF5) ư(0xFD) ..etc
+//   B) Single-byte combining marks for the 5 tones:
+//      grave(0xCC) acute(0xEC) tilde(0xDE) hook(0xD2) dot_below(0xF2)
+//
+// Double-accented chars like Ậ are encoded as Â(0xC2) + dot_below(0xF2).
+//
+// encoding_rs cannot do this decomposition, so we handle it manually.
 
-    while i < bytes.len() {
-        if bytes[i] == b'&' && i + 3 < bytes.len() && bytes[i + 1] == b'#' {
-            let mut j = i + 2;
-            let mut hex = false;
-            if j < bytes.len() && (bytes[j] == b'x' || bytes[j] == b'X') {
-                hex = true;
-                j += 1;
-            }
-            let digits_start = j;
-            while j < bytes.len() {
-                let b = bytes[j];
-                let ok = if hex {
-                    b.is_ascii_hexdigit()
-                } else {
-                    b.is_ascii_digit()
-                };
-                if !ok {
-                    break;
-                }
-                j += 1;
-            }
+fn char_to_cp1258_byte(ch: char) -> Option<u8> {
+    // ASCII pass-through
+    if (ch as u32) < 0x80 {
+        return Some(ch as u8);
+    }
+    // Full CP1258 single-byte mapping for chars 0x80..0xFF
+    // Reference: https://en.wikipedia.org/wiki/Windows-1258
+    let b = match ch {
+        // 0x80..0x9F control region (selected printable chars in CP1258)
+        '\u{20AC}' => 0x80, // €
+        '\u{201A}' => 0x82,
+        '\u{0192}' => 0x83,
+        '\u{201E}' => 0x84,
+        '\u{2026}' => 0x85, // …
+        '\u{2020}' => 0x86,
+        '\u{2021}' => 0x87,
+        '\u{02C6}' => 0x88,
+        '\u{2030}' => 0x89,
+        '\u{2039}' => 0x8B,
+        '\u{0152}' => 0x8C, // Œ
+        '\u{2018}' => 0x91,
+        '\u{2019}' => 0x92,
+        '\u{201C}' => 0x93,
+        '\u{201D}' => 0x94,
+        '\u{2022}' => 0x95,
+        '\u{2013}' => 0x96,
+        '\u{2014}' => 0x97,
+        '\u{02DC}' => 0x98,
+        '\u{2122}' => 0x99,
+        '\u{203A}' => 0x9B,
+        '\u{0153}' => 0x9C, // œ
+        '\u{0178}' => 0x9F, // Ÿ
+        // 0xA0..0xFF — Latin + Vietnamese
+        '\u{00A0}' => 0xA0, // NBSP
+        '\u{00A1}' => 0xA1,
+        '\u{00A2}' => 0xA2,
+        '\u{00A3}' => 0xA3,
+        '\u{00A4}' => 0xA4,
+        '\u{00A5}' => 0xA5,
+        '\u{00A6}' => 0xA6,
+        '\u{00A7}' => 0xA7,
+        '\u{00A8}' => 0xA8,
+        '\u{00A9}' => 0xA9,
+        '\u{00AA}' => 0xAA,
+        '\u{00AB}' => 0xAB,
+        '\u{00AC}' => 0xAC,
+        '\u{00AD}' => 0xAD,
+        '\u{00AE}' => 0xAE,
+        '\u{00AF}' => 0xAF,
+        '\u{00B0}' => 0xB0,
+        '\u{00B1}' => 0xB1,
+        '\u{00B2}' => 0xB2,
+        '\u{00B3}' => 0xB3,
+        '\u{00B4}' => 0xB4,
+        '\u{00B5}' => 0xB5,
+        '\u{00B6}' => 0xB6,
+        '\u{00B7}' => 0xB7,
+        '\u{00B8}' => 0xB8,
+        '\u{00B9}' => 0xB9,
+        '\u{00BA}' => 0xBA,
+        '\u{00BB}' => 0xBB,
+        '\u{00BC}' => 0xBC,
+        '\u{00BD}' => 0xBD,
+        '\u{00BE}' => 0xBE,
+        '\u{00BF}' => 0xBF,
+        '\u{00C0}' => 0xC0, // À
+        '\u{00C1}' => 0xC1, // Á
+        '\u{00C2}' => 0xC2, // Â
+        '\u{0102}' => 0xC3, // Ă
+        '\u{00C4}' => 0xC4, // Ä
+        '\u{00C5}' => 0xC5, // Å
+        '\u{00C6}' => 0xC6, // Æ
+        '\u{00C7}' => 0xC7, // Ç
+        '\u{00C8}' => 0xC8, // È
+        '\u{00C9}' => 0xC9, // É
+        '\u{00CA}' => 0xCA, // Ê
+        '\u{00CB}' => 0xCB, // Ë
+        '\u{0300}' => 0xCC, // combining grave
+        '\u{00CD}' => 0xCD, // Í
+        '\u{00CE}' => 0xCE, // Î
+        '\u{00CF}' => 0xCF, // Ï
+        '\u{0110}' => 0xD0, // Đ
+        '\u{00D1}' => 0xD1, // Ñ
+        '\u{0309}' => 0xD2, // combining hook above
+        '\u{00D3}' => 0xD3, // Ó
+        '\u{00D4}' => 0xD4, // Ô
+        '\u{01A0}' => 0xD5, // Ơ
+        '\u{00D6}' => 0xD6, // Ö
+        '\u{00D7}' => 0xD7, // ×
+        '\u{00D8}' => 0xD8, // Ø
+        '\u{00D9}' => 0xD9, // Ù
+        '\u{00DA}' => 0xDA, // Ú
+        '\u{00DB}' => 0xDB, // Û
+        '\u{00DC}' => 0xDC, // Ü
+        '\u{01AF}' => 0xDD, // Ư
+        '\u{0303}' => 0xDE, // combining tilde
+        '\u{00DF}' => 0xDF, // ß
+        '\u{00E0}' => 0xE0, // à
+        '\u{00E1}' => 0xE1, // á
+        '\u{00E2}' => 0xE2, // â
+        '\u{0103}' => 0xE3, // ă
+        '\u{00E4}' => 0xE4, // ä
+        '\u{00E5}' => 0xE5, // å
+        '\u{00E6}' => 0xE6, // æ
+        '\u{00E7}' => 0xE7, // ç
+        '\u{00E8}' => 0xE8, // è
+        '\u{00E9}' => 0xE9, // é
+        '\u{00EA}' => 0xEA, // ê
+        '\u{00EB}' => 0xEB, // ë
+        '\u{0301}' => 0xEC, // combining acute
+        '\u{00ED}' => 0xED, // í
+        '\u{00EE}' => 0xEE, // î
+        '\u{00EF}' => 0xEF, // ï
+        '\u{0111}' => 0xF0, // đ
+        '\u{00F1}' => 0xF1, // ñ
+        '\u{0323}' => 0xF2, // combining dot below
+        '\u{00F3}' => 0xF3, // ó
+        '\u{00F4}' => 0xF4, // ô
+        '\u{01A1}' => 0xF5, // ơ
+        '\u{00F6}' => 0xF6, // ö
+        '\u{00F7}' => 0xF7, // ÷
+        '\u{00F8}' => 0xF8, // ø
+        '\u{00F9}' => 0xF9, // ù
+        '\u{00FA}' => 0xFA, // ú
+        '\u{00FB}' => 0xFB, // û
+        '\u{00FC}' => 0xFC, // ü
+        '\u{01B0}' => 0xFD, // ư
+        '\u{20AB}' => 0xFE, // ₫
+        '\u{00FF}' => 0xFF, // ÿ
+        _ => return None,
+    };
+    Some(b)
+}
 
-            if j > digits_start && j < bytes.len() && bytes[j] == b';' {
-                let radix = if hex { 16 } else { 10 };
-                if let Ok(num_str) = std::str::from_utf8(&bytes[digits_start..j]) {
-                    if let Ok(code) = u32::from_str_radix(num_str, radix) {
-                        if let Some(ch) = char::from_u32(code) {
-                            out.push(ch);
-                            i = j + 1;
-                            continue;
-                        }
-                    }
-                }
+/// Vietnamese modifier combining marks (circumflex, breve, horn).
+/// These combine with a base vowel to form a letter that has a CP1258 single byte.
+fn is_modifier(ch: char) -> bool {
+    matches!(ch, '\u{0302}' | '\u{0306}' | '\u{031B}')
+}
+
+/// Vietnamese tone combining marks (the 5 dấu thanh).
+fn is_tone(ch: char) -> bool {
+    matches!(ch, '\u{0300}' | '\u{0301}' | '\u{0303}' | '\u{0309}' | '\u{0323}')
+}
+
+/// Encode a single Unicode char (NFC) into CP1258 bytes.
+///
+/// For double-accented chars like Ậ, Unicode NFD gives: a + ̣(dot below) + ̂(circumflex)
+/// (canonical ordering: ccc 220 before ccc 230).
+/// CP1258 needs: â(0xE2) + ̣(0xF2) — i.e. base+modifier first, then tone.
+///
+/// Strategy: NFD decompose, separate into (base, modifiers, tones),
+/// recompose base+modifiers via NFC to get a direct-mapped char, then append tones.
+fn encode_char(ch: char, out: &mut Vec<u8>) {
+    if let Some(b) = char_to_cp1258_byte(ch) {
+        out.push(b);
+        return;
+    }
+
+    let s = ch.to_string();
+    let nfd: Vec<char> = s.nfd().collect();
+
+    if nfd.len() >= 2 {
+        let base = nfd[0];
+        let mut modifiers = Vec::new();
+        let mut tones = Vec::new();
+
+        for &c in &nfd[1..] {
+            if is_modifier(c) {
+                modifiers.push(c);
+            } else if is_tone(c) {
+                tones.push(c);
             }
         }
 
-        if let Some(ch) = input[i..].chars().next() {
-            out.push(ch);
-            i += ch.len_utf8();
-        } else {
-            break;
+        // Recompose base + modifiers (e.g. a + circumflex → â)
+        let mut base_str = String::new();
+        base_str.push(base);
+        for &m in &modifiers {
+            base_str.push(m);
+        }
+        let base_nfc: String = base_str.nfc().collect();
+
+        if base_nfc.chars().count() == 1 {
+            let base_ch = base_nfc.chars().next().unwrap();
+            if let Some(base_byte) = char_to_cp1258_byte(base_ch) {
+                out.push(base_byte);
+                for &t in &tones {
+                    if let Some(tb) = char_to_cp1258_byte(t) {
+                        out.push(tb);
+                    }
+                }
+                return;
+            }
         }
     }
 
+    out.push(b'?');
+}
+
+fn encode_vietnamese_cp1258(content: &str) -> Vec<u8> {
+    let nfc: String = content.nfc().collect();
+    let mut out = Vec::with_capacity(nfc.len() * 2);
+    for ch in nfc.chars() {
+        encode_char(ch, &mut out);
+    }
     out
 }
 
-/// Chuẩn NFD + Windows-1258:
-/// - Nhiều ký tự tiếng Việt trong CP1258 được biểu diễn dạng base + dấu tổ hợp.
-/// - Nếu dùng NFC (ký tự dựng sẵn), encoder có thể fallback thành chuỗi `&#NNNN;`
-///   và máy in sẽ in literal ra giấy (lỗi như ảnh người dùng gửi).
-fn receipt_body_to_printer_bytes(content: &str) -> Vec<u8> {
-    let decoded = decode_html_numeric_entities(content);
-    let nfd: String = decoded.nfd().collect();
-    let (encoded, _enc, _had_unmappable) = WINDOWS_1258.encode(&nfd);
-    encoded.into_owned()
+fn receipt_print_bytes(content: &str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(content.len() + 64);
+
+    buf.extend_from_slice(&[0x1B, 0x40]);                            // ESC @ init
+    buf.extend_from_slice(&[0x1B, 0x74, ESC_POS_CODE_PAGE_WPC1258]); // ESC t n
+    buf.extend_from_slice(&[0x1D, 0x21, 0x00]);                      // GS ! standard size
+    buf.extend_from_slice(&[0x1B, 0x45, 0x01]);                      // ESC E bold ON
+
+    buf.extend_from_slice(&encode_vietnamese_cp1258(content));
+
+    buf.extend_from_slice(&[0x1B, 0x45, 0x00]);                      // ESC E bold OFF
+    buf.push(0x0A);
+    buf.push(0x0A);
+    buf.extend_from_slice(&[0x1D, 0x56, 0x41, 0x10]);                // GS V partial cut
+
+    buf
 }
 
-/// ESC/POS: init, chọn bảng tiếng Việt, bold on, body, bold off, feed, partial cut.
-fn receipt_print_bytes(content: &str) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&[0x1B, 0x40]); // ESC @ init
-    bytes.extend_from_slice(&[0x1B, 0x74, ESC_POS_CODE_PAGE_WPC1258]); // ESC t n — Windows-1258
-    bytes.extend_from_slice(&[0x1B, 0x45, 0x01]); // ESC E 1 bold on
-    bytes.extend_from_slice(&receipt_body_to_printer_bytes(content));
-    bytes.extend_from_slice(&[0x1B, 0x45, 0x00]); // ESC E 0 bold off
-    bytes.push(0x0A);
-    bytes.push(0x0A);
-    bytes.extend_from_slice(&[0x1D, 0x56, 0x41, 0x10]); // partial cut
-    bytes
-}
+// ---------------------------------------------------------------------------
+// Printer I/O
+// ---------------------------------------------------------------------------
 
 pub fn print_receipt_to_network(printer_addr: &str, content: &str) -> Result<(), String> {
     let mut stream = TcpStream::connect(printer_addr).map_err(|e| e.to_string())?;
@@ -177,64 +340,20 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
             .unwrap_or(0);
         let id = format!("{}_{stamp}", std::process::id());
         let txt_path = temp.join(format!("songphung_{id}.txt"));
-        let unicode_ps1_path = temp.join(format!("songphung_unicode_{id}.ps1"));
+        let ps1_path = temp.join(format!("songphung_unicode_{id}.ps1"));
 
         let windows_text = content.replace('\n', "\r\n");
         std::fs::write(&txt_path, windows_text.as_bytes())
             .map_err(|e| format!("Không ghi file text in tạm: {e}"))?;
-        std::fs::write(&unicode_ps1_path, WINDOWS_UNICODE_PRINT_PS1)
+        std::fs::write(&ps1_path, WINDOWS_UNICODE_PRINT_PS1)
             .map_err(|e| format!("Không ghi script in Unicode tạm: {e}"))?;
 
-        let txt_str = txt_path.to_str().ok_or_else(|| {
-            "Đường dẫn file text in tạm không hợp lệ (UTF-8).".to_string()
-        })?;
-        let unicode_ps1_str = unicode_ps1_path.to_str().ok_or_else(|| {
-            "Đường dẫn script in Unicode tạm không hợp lệ (UTF-8).".to_string()
-        })?;
-
-        // Ưu tiên in Unicode qua driver để đảm bảo tiếng Việt.
-        let unicode_output = powershell_command()
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                unicode_ps1_str,
-                "-Path",
-                txt_str,
-                "-Printer",
-                printer_name,
-            ])
-            .output()
-            .map_err(|e| format!("Không chạy PowerShell để in Unicode: {e}"))?;
-
-        let _ = std::fs::remove_file(&unicode_ps1_path);
-        let _ = std::fs::remove_file(&txt_path);
-        if unicode_output.status.success() {
-            return Ok(());
-        }
-
-        // Fallback RAW ESC/POS nếu driver từ chối Out-Printer.
-        let bytes = receipt_print_bytes(content);
-        let temp = std::env::temp_dir();
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let id = format!("{}_{stamp}_raw", std::process::id());
-        let prn_path = temp.join(format!("songphung_{id}.prn"));
-        let ps1_path = temp.join(format!("songphung_{id}.ps1"));
-
-        std::fs::write(&prn_path, &bytes).map_err(|e| format!("Không ghi file in tạm: {e}"))?;
-        std::fs::write(&ps1_path, WINDOWS_RAW_PRINT_PS1)
-            .map_err(|e| format!("Không ghi script in tạm: {e}"))?;
-
-        let prn_str = prn_path.to_str().ok_or_else(|| {
-            "Đường dẫn file in tạm không hợp lệ (UTF-8).".to_string()
-        })?;
-        let ps1_str = ps1_path.to_str().ok_or_else(|| {
-            "Đường dẫn script in tạm không hợp lệ (UTF-8).".to_string()
-        })?;
+        let txt_str = txt_path
+            .to_str()
+            .ok_or_else(|| "Đường dẫn file in tạm không hợp lệ.".to_string())?;
+        let ps1_str = ps1_path
+            .to_str()
+            .ok_or_else(|| "Đường dẫn script in tạm không hợp lệ.".to_string())?;
 
         let output = powershell_command()
             .args([
@@ -244,35 +363,26 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
                 "-File",
                 ps1_str,
                 "-Path",
-                prn_str,
+                txt_str,
                 "-Printer",
                 printer_name,
             ])
             .output()
-            .map_err(|e| format!("Không chạy PowerShell để in RAW: {e}"))?;
+            .map_err(|e| format!("Không chạy PowerShell để in: {e}"))?;
 
         let _ = std::fs::remove_file(&ps1_path);
-        if !output.status.success() {
-            let _ = std::fs::remove_file(&prn_path);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let unicode_stderr = String::from_utf8_lossy(&unicode_output.stderr);
-            let unicode_stdout = String::from_utf8_lossy(&unicode_output.stdout);
-            let detail = format!("{stderr}{stdout}").trim().to_string();
-            return Err(if detail.is_empty() {
-                format!(
-                    "Lệnh in máy in hệ thống thất bại (Unicode và RAW).\nUnicode: {}\nRAW: thất bại.",
-                    format!("{unicode_stderr}{unicode_stdout}").trim()
-                )
-            } else {
-                format!(
-                    "Lệnh in máy in hệ thống thất bại (Unicode và RAW).\nUnicode: {}\nRAW: {detail}",
-                    format!("{unicode_stderr}{unicode_stdout}").trim()
-                )
-            });
+        let _ = std::fs::remove_file(&txt_path);
+        if output.status.success() {
+            return Ok(());
         }
-        let _ = std::fs::remove_file(&prn_path);
-        return Ok(());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout_msg = String::from_utf8_lossy(&output.stdout);
+        let detail = format!("{stderr}{stdout_msg}").trim().to_string();
+        return Err(if detail.is_empty() {
+            "Lệnh in máy in hệ thống thất bại.".to_string()
+        } else {
+            format!("Lệnh in máy in hệ thống thất bại: {detail}")
+        });
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -322,18 +432,87 @@ pub fn print_receipt_to_target(printer_name_or_ip: &str, content: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use encoding_rs::WINDOWS_1258;
 
-    #[test]
-    fn decodes_decimal_html_entities() {
-        let content = "PH&#7908;NG";
-        let decoded = decode_html_numeric_entities(content);
-        assert_eq!(decoded, "PHỤNG");
+    fn decode_cp1258(bytes: &[u8]) -> String {
+        let (decoded, _, _) = WINDOWS_1258.decode(bytes);
+        decoded.nfc().collect()
     }
 
     #[test]
-    fn decodes_hex_html_entities() {
-        let content = "&#x110;&#x1ECB;NH";
-        let decoded = decode_html_numeric_entities(content);
-        assert_eq!(decoded, "ĐịNH");
+    fn vietnamese_receipt_text_round_trips() {
+        let samples = [
+            "KARAOKE SONG PHỤNG 2",
+            "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
+            "ĐT: 0974 089 367",
+            "PHIẾU THANH TOÁN",
+            "Phòng P1 (P1)",
+            "Thời gian: 2026-04-30",
+            "Nhân viên: Admin",
+            "Số HĐ: 00001",
+            "(Chưa thanh toán - chỉ tham khảo)",
+            "Mặt hàng",
+            "Đ.GIÁ",
+            "T.TIỀN",
+            "BIA QUY NHƠN",
+            "Nước suối",
+            "Khăn lạnh",
+            "TỔNG CỘNG:",
+            "TIỀN GIỜ:",
+            "TIỀN GIỜ (tạm tính):",
+            "TỔNG TẠM TÍNH:",
+            "TIỀN MẶT (đ):",
+            "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
+            "Chả ram tôm đất",
+            "Dưa hấu",
+            "Hướng dương",
+            "Mực khô",
+            "Bia Sài Gòn",
+            "Bia Tiger",
+            "Coca Cola",
+            "Khô gà",
+            "Bò húc",
+            "Nước STING",
+            "HEINEKEN LON",
+        ];
+
+        for sample in samples {
+            let bytes = encode_vietnamese_cp1258(sample);
+            assert!(
+                !bytes.contains(&b'?') || sample.contains('?'),
+                "Unmapped char in: {sample:?}\nbytes: {bytes:?}"
+            );
+            let decoded = decode_cp1258(&bytes);
+            let expected: String = sample.nfc().collect();
+            assert_eq!(
+                decoded, expected,
+                "Round-trip failed for: {sample:?}\nbytes: {bytes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_vietnamese_diacritics_encode() {
+        let lower = "àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ";
+        let upper: String = lower.to_uppercase();
+        for ch in lower.chars().chain(upper.chars()) {
+            let s = ch.to_string();
+            let nfd_chars: Vec<char> = s.nfd().collect();
+            let bytes = encode_vietnamese_cp1258(&s);
+            assert!(
+                !bytes.contains(&b'?'),
+                "Char '{ch}' (U+{:04X}) mapped to '?'\nnfd={:?}\nbytes: {bytes:?}",
+                ch as u32,
+                nfd_chars.iter().map(|c| format!("U+{:04X}", *c as u32)).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn output_never_contains_html_entities() {
+        let content = "PHỤNG ĐỊNH Ệ ờ ữ ẫ ổ ọ ạ ắ ẳ ẵ ặ ầ ậ";
+        let bytes = encode_vietnamese_cp1258(content);
+        let has_entity = bytes.windows(2).any(|w| w[0] == b'&' && w[1] == b'#');
+        assert!(!has_entity, "HTML entities found in output: {bytes:?}");
     }
 }

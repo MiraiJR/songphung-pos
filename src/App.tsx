@@ -496,6 +496,10 @@ function AppShell() {
                 await invoke("create_room", { payload: data });
                 await karaoke.loadMasterData();
               }}
+              onUpdate={async (data) => {
+                await invoke("update_room", { payload: data });
+                await karaoke.loadMasterData();
+              }}
               onDelete={async (roomId) => {
                 await invoke("delete_room", { roomId });
                 await karaoke.loadMasterData();

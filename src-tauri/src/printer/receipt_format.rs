@@ -79,20 +79,14 @@ pub fn line_two_cols(left: &str, right: &str) -> String {
     format!("{:<24}{:>24}\n", l, r)
 }
 
-/// Label left, value right; total visual length never exceeds `RECEIPT_WIDTH`.
-/// (Avoid `gap.max(1)` which could produce 49 columns and force the printer to wrap mid-amount.)
+/// Payment summary line with fixed right column for amount.
+/// Keeps money value on the same row even when label is long.
 pub fn line_total(label: &str, value: &str) -> String {
-    let vl = value.chars().count();
-    let reserve = if label.is_empty() || value.is_empty() {
-        0
-    } else {
-        1
-    };
-    let max_label = RECEIPT_WIDTH.saturating_sub(vl + reserve);
-    let lb: String = label.chars().take(max_label).collect();
-    let used = lb.chars().count();
-    let gap = RECEIPT_WIDTH.saturating_sub(used + vl);
-    format!("{}{}{}\n", lb, " ".repeat(gap), value)
+    const VALUE_WIDTH: usize = 14;
+    let lb_width = RECEIPT_WIDTH.saturating_sub(VALUE_WIDTH + 1);
+    let lb: String = label.chars().take(lb_width).collect();
+    let rv: String = value.chars().take(VALUE_WIDTH).collect();
+    format!("{:<lb_width$} {:>VALUE_WIDTH$}\n", lb, rv)
 }
 
 /// Table header: name area 23 + numeric columns.

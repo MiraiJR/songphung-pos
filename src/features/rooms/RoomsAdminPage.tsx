@@ -1,6 +1,7 @@
 import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { Plus, Search } from "lucide-react";
+import { Select } from "@/components/ui/select";
 import type { Room } from "@/types/karaoke";
 
 type FormData = {
@@ -8,24 +9,70 @@ type FormData = {
   tien_gio: number;
 };
 
+type EditFormData = {
+  phong_id: number;
+  ten_phong: string;
+  tien_gio: number;
+  loai_phong: "THUONG" | "VIP";
+};
+
 type Props = {
   rooms: Room[];
   onCreate: (data: FormData) => Promise<void>;
+  onUpdate: (data: { phong_id: number; ten_phong: string; tien_gio: number }) => Promise<void>;
   onDelete: (roomId: number) => Promise<void>;
 };
 
-export function RoomsAdminPage({ rooms, onCreate, onDelete }: Props) {
+function inferLoaiPhong(name: string): "THUONG" | "VIP" {
+  return name.toUpperCase().includes("VIP") ? "VIP" : "THUONG";
+}
+
+function normalizeRoomNameByType(name: string, loai: "THUONG" | "VIP"): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  if (loai === "VIP") {
+    return trimmed.toUpperCase().includes("VIP") ? trimmed : `VIP-${trimmed}`;
+  }
+  return trimmed.replace(/^VIP[-\s]*/i, "").trim() || trimmed;
+}
+
+function formatAmountDigits(digits: string): string {
+  if (!digits) return "";
+  const n = Number(digits);
+  if (!Number.isFinite(n)) return "";
+  return n.toLocaleString("en-US");
+}
+
+export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
   const form = useForm<FormData>({
     defaultValues: { ten_phong: "", tien_gio: 180000 },
   });
+  const editForm = useForm<EditFormData>({
+    defaultValues: { phong_id: 0, ten_phong: "", tien_gio: 180000, loai_phong: "THUONG" },
+  });
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [confirmDeleteRoom, setConfirmDeleteRoom] = useState<Room | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [editTienGioInput, setEditTienGioInput] = useState("180,000");
 
   const submit = form.handleSubmit(async (data) => {
     if (!data.ten_phong || data.tien_gio <= 0) return;
     await onCreate(data);
     form.reset({ ten_phong: "", tien_gio: 180000 });
     setCreateModalOpen(false);
+  });
+
+  const submitEdit = editForm.handleSubmit(async (data) => {
+    if (!data.ten_phong || data.tien_gio <= 0) return;
+    const tenPhong = normalizeRoomNameByType(data.ten_phong, data.loai_phong);
+    if (!tenPhong) return;
+    await onUpdate({
+      phong_id: data.phong_id,
+      ten_phong: tenPhong,
+      tien_gio: data.tien_gio,
+    });
+    setEditModalOpen(false);
   });
 
   const filteredRooms = rooms.filter((room) =>
@@ -105,8 +152,23 @@ export function RoomsAdminPage({ rooms, onCreate, onDelete }: Props) {
               </div>
               <div className="text-right">
                 <button
+                  className="mr-2 rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-200"
+                  onClick={() => {
+                    editForm.reset({
+                      phong_id: room.phong_id,
+                      ten_phong: room.ten_phong,
+                      tien_gio: room.tien_gio,
+                      loai_phong: inferLoaiPhong(room.ten_phong),
+                    });
+                    setEditTienGioInput(formatAmountDigits(String(Math.round(room.tien_gio))));
+                    setEditModalOpen(true);
+                  }}
+                >
+                  Sửa
+                </button>
+                <button
                   className="rounded-md bg-rose-100 px-3 py-1 text-sm font-medium text-rose-700 hover:bg-rose-200"
-                  onClick={() => void onDelete(room.phong_id)}
+                  onClick={() => setConfirmDeleteRoom(room)}
                 >
                   Xóa
                 </button>
@@ -155,6 +217,75 @@ export function RoomsAdminPage({ rooms, onCreate, onDelete }: Props) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {editModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
+          <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <h3 className="mb-3 text-lg font-semibold">Sửa thông tin phòng</h3>
+            <form className="space-y-2" onSubmit={submitEdit}>
+              <input
+                className="app-input w-full bg-slate-100 text-slate-500"
+                disabled
+                value={`Mã phòng: ${editForm.watch("phong_id") || "--"}`}
+              />
+              <input
+                className="app-input w-full"
+                placeholder="Tên phòng"
+                {...editForm.register("ten_phong")}
+              />
+              <Select className="w-full" {...editForm.register("loai_phong")}>
+                <option value="THUONG">Thường</option>
+                <option value="VIP">VIP</option>
+              </Select>
+              <input
+                className="app-input w-full"
+                placeholder="Tiền giờ"
+                inputMode="numeric"
+                value={editTienGioInput}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, "");
+                  setEditTienGioInput(formatAmountDigits(digits));
+                  editForm.setValue("tien_gio", digits ? Number(digits) : 0, { shouldValidate: true });
+                }}
+              />
+              <p className="text-xs text-slate-500">Loại phòng sẽ tự đồng bộ vào tên (ví dụ: VIP-1).</p>
+              <div className="mt-3 flex justify-end gap-2">
+                <button type="button" className="btn-ghost" onClick={() => setEditModalOpen(false)}>
+                  Hủy
+                </button>
+                <button className="btn-secondary" type="submit">
+                  Lưu thay đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {confirmDeleteRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
+          <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-800">Xác nhận xóa phòng</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Bạn có chắc muốn xóa phòng <span className="font-semibold">{confirmDeleteRoom.ten_phong}</span> không?
+            </p>
+            <p className="mt-1 text-xs text-rose-600">Hành động này không thể hoàn tác.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setConfirmDeleteRoom(null)}>
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={async () => {
+                  await onDelete(confirmDeleteRoom.phong_id);
+                  setConfirmDeleteRoom(null);
+                }}
+              >
+                Xóa phòng
+              </button>
+            </div>
           </div>
         </div>
       )}
