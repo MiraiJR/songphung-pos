@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { HistoryOrderItem, PaidHistory } from "@/types/karaoke";
 import { Button } from "@/components/ui/button";
+import { formatDateTime } from "@/utils/formatDateTime";
 
 type Props = {
   histories: PaidHistory[];
@@ -85,7 +86,7 @@ export function HistoryPage({
             <div key={item.lich_su_phong_id} className="relative grid grid-cols-[1.2fr,1.4fr,1fr,1fr] items-center border-b border-slate-200 px-4 py-3 text-sm hover:bg-slate-50">
               <div className="font-semibold text-slate-800">{item.ten_phong}</div>
               <div className="text-slate-600">
-                {item.gio_bat_dau} - {item.gio_ket_thuc}
+                {formatDateTime(item.gio_bat_dau)} - {formatDateTime(item.gio_ket_thuc)}
               </div>
               <div className="text-right text-base font-semibold text-slate-800">{item.tong_tien_thanh_toan.toLocaleString()}</div>
               <div className="text-right">
@@ -161,8 +162,8 @@ export function HistoryPage({
             <h3 className="mb-3 text-lg font-semibold">Chi tiết hóa đơn #{selectedHistory.lich_su_phong_id}</h3>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div>Phòng: {selectedHistory.ten_phong}</div>
-              <div>Giờ vào: {selectedHistory.gio_bat_dau}</div>
-              <div>Giờ ra: {selectedHistory.gio_ket_thuc ?? "--"}</div>
+              <div>Giờ vào: {formatDateTime(selectedHistory.gio_bat_dau)}</div>
+              <div>Giờ ra: {formatDateTime(selectedHistory.gio_ket_thuc)}</div>
               <div>Tiền món: {selectedHistory.tong_tien_san_pham.toLocaleString()}</div>
               <div>Tiền giờ: {selectedHistory.tong_tien_gio.toLocaleString()}</div>
               <div className="font-semibold">Tổng thanh toán: {selectedHistory.tong_tien_thanh_toan.toLocaleString()}</div>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Loader2, Pencil, Search, Trash2 } from "lucide-react";
 import { ROOM_STATUS_LABEL } from "@/types/karaoke";
 import type { CurrentSession, OrderItem, Product, ProductGroup, Room } from "@/types/karaoke";
+import { formatDateTime } from "@/utils/formatDateTime";
 
 type Props = {
   rooms: Room[];
@@ -93,8 +94,7 @@ export function PosPage(props: Props) {
           <div className="flex items-start justify-between">
             <h2 className="text-2xl font-bold text-slate-800">{selectedRoom ? selectedRoom.ten_phong : "--"}</h2>
             <div className="text-right">
-              <div className="text-3xl font-semibold text-primary">{currentSession ? "02:15" : "--:--"}</div>
-              <div className="text-xs text-slate-500">Bắt đầu: {currentSession?.gio_bat_dau ?? "--"}</div>
+              <div className="text-xs text-slate-500">Bắt đầu: {formatDateTime(currentSession?.gio_bat_dau)}</div>
             </div>
           </div>
           {selectedRoom && (

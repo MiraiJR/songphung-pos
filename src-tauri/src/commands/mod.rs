@@ -683,7 +683,7 @@ pub async fn start_room(state: tauri::State<'_, DbState>, room_id: i64) -> Resul
         .map_err(|e| e.to_string())?;
 
     let result = sqlx::query(
-        "INSERT INTO lich_su_phong(phong_id, gio_bat_dau, tien_gio, trang_thai) VALUES (?, CURRENT_TIMESTAMP, ?, 'DANG_PHUC_VU')",
+        "INSERT INTO lich_su_phong(phong_id, gio_bat_dau, tien_gio, trang_thai) VALUES (?, datetime('now','localtime'), ?, 'DANG_PHUC_VU')",
     )
     .bind(room_id)
     .bind(tien_gio)
@@ -902,7 +902,7 @@ pub async fn checkout_room(
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     let row = sqlx::query(
-        "SELECT CAST((julianday(CURRENT_TIMESTAMP) - julianday(gio_bat_dau)) * 24 * 60 AS INTEGER) AS total_minutes, tien_gio
+        "SELECT CAST((julianday(datetime('now','localtime')) - julianday(gio_bat_dau)) * 24 * 60 AS INTEGER) AS total_minutes, tien_gio
          FROM lich_su_phong
          WHERE lich_su_phong_id = ?",
     )
@@ -924,7 +924,7 @@ pub async fn checkout_room(
 
     sqlx::query(
         "UPDATE lich_su_phong
-         SET gio_ket_thuc = CURRENT_TIMESTAMP,
+         SET gio_ket_thuc = datetime('now','localtime'),
              tong_tien_san_pham = ?,
              tong_tien_gio = ?,
              tong_tien_thanh_toan = ?,
@@ -1033,7 +1033,7 @@ pub async fn get_current_session(
 
     let tong_tien_san_pham = items.iter().map(|item| item.thanh_tien).sum::<f64>();
     let minutes: i64 = sqlx::query_scalar(
-        "SELECT CAST((julianday(CURRENT_TIMESTAMP) - julianday(gio_bat_dau)) * 24 * 60 AS INTEGER)
+        "SELECT CAST((julianday(datetime('now','localtime')) - julianday(gio_bat_dau)) * 24 * 60 AS INTEGER)
          FROM lich_su_phong WHERE lich_su_phong_id = ?",
     )
     .bind(history_id)
