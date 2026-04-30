@@ -1,7 +1,17 @@
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Download, Plus, Search, Upload } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import type { ProductGroup } from "@/types/karaoke";
+import { formatInvokeError } from "@/utils/invokeError";
+
+type CsvImportStats = {
+  message: string;
+  total_rows: number;
+  inserted: number;
+  updated: number;
+};
 
 type Props = {
   groups: ProductGroup[];
@@ -12,9 +22,15 @@ type Props = {
     nhom_san_pham_cha_id: number | null;
   }) => Promise<void>;
   onDelete: (groupId: number) => Promise<void>;
+  onReloadMaster?: () => Promise<void>;
 };
 
-export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete }: Props) {
+function dialogPath(selected: string | string[] | null): string | null {
+  if (selected === null) return null;
+  return Array.isArray(selected) ? (selected[0] ?? null) : selected;
+}
+
+export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onReloadMaster }: Props) {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -26,6 +42,7 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete }: Pr
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTenNhom, setEditTenNhom] = useState("");
   const [editParentId, setEditParentId] = useState<string>("");
+  const [csvBusy, setCsvBusy] = useState(false);
 
   const filteredGroups = useMemo(
     () =>
@@ -40,17 +57,71 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete }: Pr
     [groups, searchKeyword, filterParentId],
   );
 
+  async function handleExportNhomTemplate() {
+    setCsvBusy(true);
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      const dir = dialogPath(selected);
+      if (!dir) return;
+      await invoke("export_nhom_san_pham_template", { dirPath: dir });
+      window.alert(`Đã tạo nhom_san_pham.csv trong thư mục:\n${dir}`);
+    } catch (e) {
+      window.alert(formatInvokeError(e));
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
+  async function handleImportCategoriesCsv() {
+    setCsvBusy(true);
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      const path = dialogPath(selected);
+      if (!path) return;
+      const stats = await invoke<CsvImportStats>("import_categories_csv", { filePath: path });
+      window.alert(stats.message);
+      await onReloadMaster?.();
+    } catch (e) {
+      window.alert(formatInvokeError(e));
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
   return (
     <section className="p-4">
-      <div className="mb-4 flex items-start justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Danh sách nhóm sản phẩm</h2>
           <p className="mt-1 text-sm text-slate-500">Quản lý cấu trúc nhóm và nhóm cha.</p>
         </div>
-        <button className="btn-primary inline-flex items-center gap-2" onClick={() => setCreateModalOpen(true)}>
-          <Plus size={16} />
-          Thêm nhóm mới
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-2"
+            disabled={csvBusy}
+            onClick={() => void handleExportNhomTemplate()}
+          >
+            <Download size={16} />
+            Tải mẫu CSV nhóm
+          </button>
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-2"
+            disabled={csvBusy}
+            onClick={() => void handleImportCategoriesCsv()}
+          >
+            <Upload size={16} />
+            Import nhóm CSV
+          </button>
+          <button className="btn-primary inline-flex items-center gap-2" onClick={() => setCreateModalOpen(true)}>
+            <Plus size={16} />
+            Thêm nhóm mới
+          </button>
+        </div>
       </div>
 
       <div className="app-card mb-4 p-3">

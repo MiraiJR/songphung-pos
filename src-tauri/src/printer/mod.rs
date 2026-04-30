@@ -1,9 +1,11 @@
 pub mod receipt_format;
 
+use encoding_rs::WINDOWS_1258;
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
+use unicode_normalization::UnicodeNormalization;
 
 #[cfg(target_os = "windows")]
 const WINDOWS_RAW_PRINT_PS1: &str = include_str!("windows_raw_print.ps1");
@@ -18,12 +20,24 @@ fn powershell_command() -> Command {
     cmd
 }
 
-/// ESC/POS: init, bold on, body, bold off, feed, partial cut.
+/// WPC1258 (Vietnamese) — bảng ký tự thường gặp trên máy in ESC/POS (Epson/Bixolon/nhiều Xprinter).
+/// Một số máy dùng byte khác (ví dụ 47, 56); nếu vẫn sai, xem manual máy in.
+const ESC_POS_CODE_PAGE_WPC1258: u8 = 52;
+
+/// Chuẩn NFC + Windows-1258: máy in nhận byte 1-byte/code page, không phải UTF-8 thô.
+fn receipt_body_to_printer_bytes(content: &str) -> Vec<u8> {
+    let nfc: String = content.nfc().collect();
+    let (encoded, _enc, _had_unmappable) = WINDOWS_1258.encode(&nfc);
+    encoded.into_owned()
+}
+
+/// ESC/POS: init, chọn bảng tiếng Việt, bold on, body, bold off, feed, partial cut.
 fn receipt_print_bytes(content: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&[0x1B, 0x40]); // ESC @ init
+    bytes.extend_from_slice(&[0x1B, 0x74, ESC_POS_CODE_PAGE_WPC1258]); // ESC t n — Windows-1258
     bytes.extend_from_slice(&[0x1B, 0x45, 0x01]); // ESC E 1 bold on
-    bytes.extend_from_slice(content.as_bytes());
+    bytes.extend_from_slice(&receipt_body_to_printer_bytes(content));
     bytes.extend_from_slice(&[0x1B, 0x45, 0x00]); // ESC E 0 bold off
     bytes.push(0x0A);
     bytes.push(0x0A);

@@ -79,13 +79,20 @@ pub fn line_two_cols(left: &str, right: &str) -> String {
     format!("{:<24}{:>24}\n", l, r)
 }
 
+/// Label left, value right; total visual length never exceeds `RECEIPT_WIDTH`.
+/// (Avoid `gap.max(1)` which could produce 49 columns and force the printer to wrap mid-amount.)
 pub fn line_total(label: &str, value: &str) -> String {
     let vl = value.chars().count();
-    let max_label = RECEIPT_WIDTH.saturating_sub(vl);
+    let reserve = if label.is_empty() || value.is_empty() {
+        0
+    } else {
+        1
+    };
+    let max_label = RECEIPT_WIDTH.saturating_sub(vl + reserve);
     let lb: String = label.chars().take(max_label).collect();
     let used = lb.chars().count();
     let gap = RECEIPT_WIDTH.saturating_sub(used + vl);
-    format!("{}{}{}\n", lb, " ".repeat(gap.max(1)), value)
+    format!("{}{}{}\n", lb, " ".repeat(gap), value)
 }
 
 /// Table header: name area 23 + numeric columns.
@@ -114,4 +121,28 @@ pub fn lines_item_row(name: &str, qty: i64, dgia: &str, ttien: &str) -> String {
         out.push_str(&format!("{}\n", chunk));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_total_never_exceeds_receipt_width() {
+        for (label, value) in [
+            ("TỔNG CỘNG:", "425,000"),
+            ("TIỀN GIỜ (tạm tính):", "165,000"),
+            ("TIỀN MẶT (đ):", "1,234,567"),
+            ("X", "99,999,999"),
+        ] {
+            let line = line_total(label, value);
+            let row = line.trim_end_matches('\n');
+            assert!(
+                row.chars().count() <= RECEIPT_WIDTH,
+                "len {} for {:?}",
+                row.chars().count(),
+                row
+            );
+        }
+    }
 }

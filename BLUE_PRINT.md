@@ -232,6 +232,22 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     4. Gửi lệnh tới máy in.
 * **Ràng buộc:** Chỉ áp dụng cho phòng đang `DANG_HOAT_DONG`. Không thực hiện bất kỳ câu lệnh `UPDATE` nào vào Database.
 
+### Feature 13: Import & Export CSV (với logic Upsert)
+* **Giao diện:** Nằm tại `/admin/products`. Gồm 2 nút: **[Tải file mẫu]** và **[Import CSV]**.
+* **Tính năng 1: Tải file mẫu (Export Template)**
+    * Hệ thống tạo 2 file mẫu kèm Header và 1 dòng ví dụ để user dễ hiểu.
+    * **Template `nhom_san_pham.csv`:** `nhom_san_pham_id`, `ten_nhom`, `nhom_san_pham_cha_id`
+    * **Template `san_pham.csv`:** `san_pham_id`, `ten_san_pham`, `nhom_san_pham_id`, `don_vi_tinh`, `don_gia`
+* **Tính năng 2: Import & Upsert (Cập nhật nếu trùng)**
+    * **Xử lý Backend (Rust):**
+        1. **Đọc & Validate:** Sử dụng crate `csv`. Kiểm tra các cột bắt buộc.
+        2. **Logic Upsert (INSERT OR REPLACE):**
+            * Đối với **Nhóm sản phẩm**: Nếu `nhom_san_pham_id` đã tồn tại, cập nhật `ten_nhom` và `nhom_san_pham_cha_id`.
+            * Đối với **Sản phẩm**: Nếu `san_pham_id` đã tồn tại, tiến hành cập nhật (Update) các trường tên, đơn giá, đơn vị tính thay vì báo lỗi trùng lặp.
+        3. **Ràng buộc:** Khi import sản phẩm, hệ thống phải kiểm tra `nhom_san_pham_id` có tồn tại trong bảng nhóm chưa. Nếu chưa, dòng đó sẽ bị bỏ qua và báo lỗi chi tiết.
+        4. **Transaction:** Sử dụng `sqlx::Transaction` để đảm bảo nếu file có 100 dòng mà dòng 99 lỗi thì 98 dòng trước đó không bị lưu vào DB (giữ data sạch).
+
+
 ---
 
 ## 5. TỐI ƯU HIỆU SUẤT (Windows OS / Tauri Tips)

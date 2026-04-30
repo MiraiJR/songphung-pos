@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pencil, Search, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Search, Trash2 } from "lucide-react";
 import { ROOM_STATUS_LABEL } from "@/types/karaoke";
 import type { CurrentSession, OrderItem, Product, ProductGroup, Room } from "@/types/karaoke";
 
@@ -20,6 +20,7 @@ type Props = {
   onCheckout: () => void;
   onTransferRoom: (targetRoomId: number) => Promise<void>;
   onPrintTemporaryBill: () => Promise<void>;
+  printTemporaryBillLoading?: boolean;
 };
 
 export function PosPage(props: Props) {
@@ -40,6 +41,7 @@ export function PosPage(props: Props) {
     onCheckout,
     onTransferRoom,
     onPrintTemporaryBill,
+    printTemporaryBillLoading = false,
   } = props;
   const [keyword, setKeyword] = useState("");
   const [activeGroupId, setActiveGroupId] = useState<string>("ALL");
@@ -85,8 +87,8 @@ export function PosPage(props: Props) {
   );
 
   return (
-    <section className="grid h-[calc(100vh-61px)] grid-cols-10 gap-3 bg-slate-100 p-3">
-      <aside className="app-card col-span-3 flex flex-col overflow-hidden p-0">
+    <section className="grid h-[calc(100vh-61px)] grid-cols-10 gap-3 overflow-hidden bg-slate-100 p-3">
+      <aside className="app-card col-span-3 flex min-h-0 flex-col overflow-hidden p-0">
         <div className="border-b border-slate-200 p-3">
           <div className="flex items-start justify-between">
             <h2 className="text-2xl font-bold text-slate-800">{selectedRoom ? selectedRoom.ten_phong : "--"}</h2>
@@ -102,7 +104,7 @@ export function PosPage(props: Props) {
           )}
         </div>
 
-        <div className="flex-1 space-y-2 overflow-auto p-3">
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
           {currentSession?.items.map((item) => (
             <div key={item.lich_su_phong_san_pham_id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
               <div className="grid grid-cols-[auto,1fr,100px] gap-2 text-sm">
@@ -183,10 +185,19 @@ export function PosPage(props: Props) {
                 <div className="mt-3 grid w-full grid-cols-2 gap-2">
                   <button
                     type="button"
-                    className="btn-primary min-w-0 w-full text-sm"
+                    className="btn-primary inline-flex min-w-0 w-full items-center justify-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={printTemporaryBillLoading}
+                    aria-busy={printTemporaryBillLoading}
                     onClick={() => void onPrintTemporaryBill()}
                   >
-                    In phiếu
+                    {printTemporaryBillLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        <span>Đang in phiếu…</span>
+                      </>
+                    ) : (
+                      "In phiếu"
+                    )}
                   </button>
                   <button type="button" className="btn-danger min-w-0 w-full" onClick={onCancelRoom}>
                     Trả phòng
@@ -223,7 +234,7 @@ export function PosPage(props: Props) {
         )}
       </aside>
 
-      <section className="col-span-5 flex flex-col gap-3">
+      <section className="col-span-5 flex min-h-0 flex-col gap-3">
         <div className="app-card p-3">
           <label className="relative block">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -251,7 +262,7 @@ export function PosPage(props: Props) {
           </div>
         </div>
 
-        <div className="app-card flex-1 overflow-auto p-3">
+        <div className="app-card min-h-0 flex-1 overflow-auto p-3">
           <div className="grid grid-cols-4 gap-3">
             {filteredProducts.map((product) => (
               <button

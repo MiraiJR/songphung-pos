@@ -1,8 +1,11 @@
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Download, Plus, Search, Upload } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import type { Product, ProductGroup } from "@/types/karaoke";
+import { formatInvokeError } from "@/utils/invokeError";
 
 type FormData = {
   san_pham_id: string;
@@ -12,15 +15,28 @@ type FormData = {
   nhom_san_pham_id?: string;
 };
 
+type CsvImportStats = {
+  message: string;
+  total_rows: number;
+  inserted: number;
+  updated: number;
+};
+
 type Props = {
   products: Product[];
   groups: ProductGroup[];
   onCreate: (data: FormData) => Promise<void>;
   onUpdate: (data: FormData) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onReloadMaster?: () => Promise<void>;
 };
 
-export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDelete }: Props) {
+function dialogPath(selected: string | string[] | null): string | null {
+  if (selected === null) return null;
+  return Array.isArray(selected) ? (selected[0] ?? null) : selected;
+}
+
+export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDelete, onReloadMaster }: Props) {
   const form = useForm<FormData>({
     defaultValues: { don_vi_tinh: "phan", don_gia: 10000 },
   });
@@ -32,6 +48,7 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
   const [editDonViTinh, setEditDonViTinh] = useState("");
   const [editDonGia, setEditDonGia] = useState("0");
   const [editNhomId, setEditNhomId] = useState("");
+  const [csvBusy, setCsvBusy] = useState(false);
 
   const filteredProducts = products.filter((product) => {
     const byName = product.ten_san_pham.toLowerCase().includes(searchKeyword.toLowerCase());
@@ -41,17 +58,71 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
     return byName && byGroup;
   });
 
+  async function handleExportSanPhamTemplate() {
+    setCsvBusy(true);
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      const dir = dialogPath(selected);
+      if (!dir) return;
+      await invoke("export_san_pham_template", { dirPath: dir });
+      window.alert(`Đã tạo san_pham.csv trong thư mục:\n${dir}`);
+    } catch (e) {
+      window.alert(formatInvokeError(e));
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
+  async function handleImportProductsCsv() {
+    setCsvBusy(true);
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      const path = dialogPath(selected);
+      if (!path) return;
+      const stats = await invoke<CsvImportStats>("import_products_csv", { filePath: path });
+      window.alert(stats.message);
+      await onReloadMaster?.();
+    } catch (e) {
+      window.alert(formatInvokeError(e));
+    } finally {
+      setCsvBusy(false);
+    }
+  }
+
   return (
     <section className="p-4">
-      <div className="mb-4 flex items-start justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Danh sách sản phẩm</h2>
           <p className="mt-1 text-sm text-slate-500">Quản lý món bán, đơn giá và nhóm sản phẩm.</p>
         </div>
-        <button className="btn-primary inline-flex items-center gap-2" onClick={() => setCreateModalOpen(true)}>
-          <Plus size={16} />
-          Thêm sản phẩm mới
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-2"
+            disabled={csvBusy}
+            onClick={() => void handleExportSanPhamTemplate()}
+          >
+            <Download size={16} />
+            Tải mẫu CSV sản phẩm
+          </button>
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-2"
+            disabled={csvBusy}
+            onClick={() => void handleImportProductsCsv()}
+          >
+            <Upload size={16} />
+            Import sản phẩm CSV
+          </button>
+          <button className="btn-primary inline-flex items-center gap-2" onClick={() => setCreateModalOpen(true)}>
+            <Plus size={16} />
+            Thêm sản phẩm mới
+          </button>
+        </div>
       </div>
 
       <div className="app-card mb-4 p-3">

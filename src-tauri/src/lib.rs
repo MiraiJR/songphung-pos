@@ -1,4 +1,5 @@
 mod commands;
+mod csv_import;
 mod database;
 mod models;
 mod printer;
@@ -12,6 +13,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(db_state)
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
@@ -43,7 +45,12 @@ pub fn run() {
             commands::reprint_history_bill,
             commands::get_current_session,
             commands::list_paid_history,
-            commands::get_history_order_items
+            commands::get_history_order_items,
+            csv_import::export_csv_templates,
+            csv_import::export_nhom_san_pham_template,
+            csv_import::export_san_pham_template,
+            csv_import::import_categories_csv,
+            csv_import::import_products_csv
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

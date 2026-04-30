@@ -64,6 +64,7 @@ function AppShell() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [qtyInput, setQtyInput] = useState("1");
   const [printerTarget, setPrinterTarget] = useState("");
+  const [printTemporaryBillLoading, setPrintTemporaryBillLoading] = useState(false);
   const karaoke = useKaraoke();
 
   useEffect(() => {
@@ -124,6 +125,7 @@ function AppShell() {
     }
     const s = karaoke.currentSession;
     const gio_hien_tai = formatLocalDateTimeForBill(new Date());
+    setPrintTemporaryBillLoading(true);
     try {
       await invoke("print_temporary_bill", {
         data: {
@@ -145,6 +147,8 @@ function AppShell() {
       });
     } catch (error) {
       alertInvokeError(error, "Không in được phiếu tạm tính:");
+    } finally {
+      setPrintTemporaryBillLoading(false);
     }
   }
 
@@ -340,6 +344,7 @@ function AppShell() {
                 onCheckout={requestCheckout}
                 onTransferRoom={handleTransferRoom}
                 onPrintTemporaryBill={handlePrintTemporaryBill}
+                printTemporaryBillLoading={printTemporaryBillLoading}
               />
               {orderModalOpen && selectedProduct && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
@@ -504,6 +509,7 @@ function AppShell() {
             <ProductsAdminPage
               products={karaoke.products}
               groups={karaoke.groups}
+              onReloadMaster={() => karaoke.loadMasterData()}
               onCreate={async (data) => {
                 const existed = karaoke.products.some((item) => item.san_pham_id === data.san_pham_id);
                 if (existed) {
@@ -539,6 +545,7 @@ function AppShell() {
           element={
             <CategoriesAdminPage
               groups={karaoke.groups}
+              onReloadMaster={() => karaoke.loadMasterData()}
               onCreate={async (payload: { ten_nhom: string; nhom_san_pham_cha_id: number | null }) => {
                 await invoke("create_product_group", { payload });
                 await karaoke.loadMasterData();
