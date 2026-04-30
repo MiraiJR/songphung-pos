@@ -1219,3 +1219,66 @@ pub async fn reprint_history_bill(
     crate::printer::print_receipt_to_target(&address, &content)?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))
 }
+
+#[tauri::command]
+pub async fn delete_history_by_ids(
+    state: tauri::State<'_, DbState>,
+    ids: Vec<i64>,
+) -> Result<u64, String> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let pool = state.pool();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+    let count_query = format!(
+        "SELECT COUNT(*) FROM lich_su_phong WHERE lich_su_phong_id IN ({placeholders}) AND trang_thai != 'DA_THANH_TOAN'"
+    );
+    let mut q = sqlx::query_scalar::<_, i64>(&count_query);
+    for id in &ids {
+        q = q.bind(id);
+    }
+    let unsafe_count: i64 = q.fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+    if unsafe_count > 0 {
+        return Err("Chỉ được phép xóa hóa đơn đã thanh toán (DA_THANH_TOAN).".to_string());
+    }
+
+    let delete_query = format!(
+        "DELETE FROM lich_su_phong WHERE lich_su_phong_id IN ({placeholders}) AND trang_thai = 'DA_THANH_TOAN'"
+    );
+    let mut dq = sqlx::query(&delete_query);
+    for id in &ids {
+        dq = dq.bind(id);
+    }
+    let result = dq.execute(&mut *tx).await.map_err(|e| e.to_string())?;
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result.rows_affected())
+}
+
+#[tauri::command]
+pub async fn delete_history_by_range(
+    state: tauri::State<'_, DbState>,
+    start_date: String,
+    end_date: String,
+) -> Result<u64, String> {
+    let pool = state.pool();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let result = sqlx::query(
+        "DELETE FROM lich_su_phong
+         WHERE trang_thai = 'DA_THANH_TOAN'
+           AND date(gio_ket_thuc) >= date(?)
+           AND date(gio_ket_thuc) <= date(?)",
+    )
+    .bind(&start_date)
+    .bind(&end_date)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result.rows_affected())
+}

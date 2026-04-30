@@ -4,6 +4,16 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import { Download, Plus, Search, Upload } from "lucide-react";
 import { Select } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Product, ProductGroup } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
 
@@ -48,6 +58,8 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
   const [editDonViTinh, setEditDonViTinh] = useState("");
   const [editDonGia, setEditDonGia] = useState("0");
   const [editNhomId, setEditNhomId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
 
   const filteredProducts = products.filter((product) => {
@@ -89,6 +101,17 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       window.alert(formatInvokeError(e));
     } finally {
       setCsvBusy(false);
+    }
+  }
+
+  async function confirmDeleteProduct() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await onDelete(deleteTarget.san_pham_id);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -197,7 +220,7 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
                       </button>
                       <button
                         className="rounded-md bg-rose-100 px-3 py-1 text-rose-700"
-                        onClick={() => void onDelete(product.san_pham_id)}
+                        onClick={() => setDeleteTarget(product)}
                       >
                         Xóa
                       </button>
@@ -352,6 +375,38 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
           </div>
         </div>
       )}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-rose-600">Xác nhận xóa sản phẩm</AlertDialogTitle>
+            <AlertDialogDescription>
+              Bạn có chắc chắn muốn xóa sản phẩm{" "}
+              <span className="font-semibold text-slate-900">
+                {deleteTarget?.ten_san_pham ?? ""}
+              </span>{" "}
+              (<span className="font-mono">{deleteTarget?.san_pham_id ?? ""}</span>)? Hành động này không thể hoàn tác.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteProduct();
+              }}
+            >
+              {deleting ? "Đang xóa..." : "Xóa"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

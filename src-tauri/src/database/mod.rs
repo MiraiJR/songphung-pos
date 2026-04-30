@@ -16,6 +16,7 @@ impl DbState {
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true)
             .disable_statement_logging();
 
         let pool = SqlitePoolOptions::new()

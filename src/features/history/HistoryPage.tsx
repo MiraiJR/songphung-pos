@@ -1,7 +1,20 @@
 import { useState } from "react";
+import { toast } from "sonner";
+import { Trash2 } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
-import type { HistoryOrderItem, PaidHistory } from "@/types/karaoke";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import type { HistoryOrderItem, PaidHistory } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
 
 type Props = {
@@ -12,7 +25,18 @@ type Props = {
   onFilter: () => void;
   onOpenDetail: (historyId: number) => Promise<void>;
   onReprintBill: (historyId: number) => Promise<string>;
+  onDeleteByIds: (ids: number[]) => Promise<number>;
+  onDeleteByRange: (startDate: string, endDate: string) => Promise<number>;
+  onReloadHistory: () => Promise<void>;
 };
+
+function todayLocalYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export function HistoryPage({
   histories,
@@ -22,12 +46,23 @@ export function HistoryPage({
   onFilter,
   onOpenDetail,
   onReprintBill,
+  onDeleteByIds,
+  onDeleteByRange,
+  onReloadHistory,
 }: Props) {
   const [menuHistoryId, setMenuHistoryId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<PaidHistory | null>(null);
   const [reprintStatus, setReprintStatus] = useState<{ type: "ok" | "error"; message: string } | null>(null);
   const [reprintingHistoryId, setReprintingHistoryId] = useState<number | null>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [deleteIdsDialogOpen, setDeleteIdsDialogOpen] = useState(false);
+  const [deleteRangeDialogOpen, setDeleteRangeDialogOpen] = useState(false);
+  const [rangeStart, setRangeStart] = useState(() => todayLocalYmd());
+  const [rangeEnd, setRangeEnd] = useState(() => todayLocalYmd());
+  const [rangeConfirmText, setRangeConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   async function handleViewDetail(item: PaidHistory) {
     await onOpenDetail(item.lich_su_phong_id);
@@ -36,6 +71,57 @@ export function HistoryPage({
     setMenuHistoryId(null);
   }
 
+  function toggleSelect(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === histories.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(histories.map((h) => h.lich_su_phong_id)));
+    }
+  }
+
+  async function confirmDeleteByIds() {
+    setDeleting(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const count = await onDeleteByIds(ids);
+      toast.success(`Đã xóa ${count} hóa đơn thành công.`);
+      setSelectedIds(new Set());
+      await onReloadHistory();
+    } catch (error) {
+      toast.error(`Xóa thất bại: ${String(error)}`);
+    } finally {
+      setDeleting(false);
+      setDeleteIdsDialogOpen(false);
+    }
+  }
+
+  async function confirmDeleteByRange() {
+    setDeleting(true);
+    try {
+      const count = await onDeleteByRange(rangeStart, rangeEnd);
+      toast.success(`Đã xóa ${count} hóa đơn trong khoảng ngày đã chọn.`);
+      setSelectedIds(new Set());
+      setRangeConfirmText("");
+      await onReloadHistory();
+    } catch (error) {
+      toast.error(`Xóa thất bại: ${String(error)}`);
+    } finally {
+      setDeleting(false);
+      setDeleteRangeDialogOpen(false);
+    }
+  }
+
+  const allSelected = histories.length > 0 && selectedIds.size === histories.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < histories.length;
   const totalRevenue = histories.reduce((sum, item) => sum + item.tong_tien_thanh_toan, 0);
 
   return (
@@ -47,11 +133,7 @@ export function HistoryPage({
         </div>
         <div className="flex items-center gap-2">
           <DatePicker value={historyDate} onChange={onDateChange} />
-          <Button
-            className="h-[48px]"
-            variant="default"
-            onClick={onFilter}
-          >
+          <Button className="h-[48px]" variant="default" onClick={onFilter}>
             Lọc
           </Button>
         </div>
@@ -66,6 +148,50 @@ export function HistoryPage({
         </div>
       </div>
 
+      {/* Bulk actions toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="app-card mb-4 flex items-center gap-3 border-rose-200 bg-rose-50 px-4 py-3">
+          <span className="text-sm font-medium text-rose-800">
+            Đã chọn {selectedIds.size} hóa đơn
+          </span>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteIdsDialogOpen(true)}
+          >
+            <Trash2 className="mr-1.5 size-4" />
+            Xóa mục đã chọn
+          </Button>
+        </div>
+      )}
+
+      {/* Delete by date range */}
+      <div className="app-card mb-4 flex flex-wrap items-end gap-3 p-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Từ ngày</label>
+          <DatePicker value={rangeStart} onChange={setRangeStart} />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Đến ngày</label>
+          <DatePicker value={rangeEnd} onChange={setRangeEnd} />
+        </div>
+        <Button
+          variant="destructive"
+          className="h-[48px]"
+          onClick={() => {
+            if (rangeStart > rangeEnd) {
+              toast.error("Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.");
+              return;
+            }
+            setRangeConfirmText("");
+            setDeleteRangeDialogOpen(true);
+          }}
+        >
+          <Trash2 className="mr-1.5 size-4" />
+          Xóa theo khoảng ngày
+        </Button>
+      </div>
+
       {reprintStatus && (
         <div
           className={`mb-3 rounded px-3 py-2 text-sm ${reprintStatus.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
@@ -74,21 +200,40 @@ export function HistoryPage({
           {reprintStatus.message}
         </div>
       )}
+
       <div className="grid grid-cols-3 gap-3">
         <div className="app-card col-span-2 overflow-visible">
-          <div className="grid grid-cols-[1.2fr,1.4fr,1fr,1fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+          <div className="grid grid-cols-[40px,1.2fr,1.4fr,1fr,1fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+            <span className="flex items-center justify-center">
+              <Checkbox
+                checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                onCheckedChange={toggleSelectAll}
+              />
+            </span>
             <span>Phòng</span>
             <span>Thời gian</span>
             <span className="text-right">Tổng tiền</span>
             <span className="text-right">Thao tác</span>
           </div>
           {histories.map((item) => (
-            <div key={item.lich_su_phong_id} className="relative grid grid-cols-[1.2fr,1.4fr,1fr,1fr] items-center border-b border-slate-200 px-4 py-3 text-sm hover:bg-slate-50">
+            <div
+              key={item.lich_su_phong_id}
+              className={`relative grid grid-cols-[40px,1.2fr,1.4fr,1fr,1fr] items-center border-b border-slate-200 px-4 py-3 text-sm hover:bg-slate-50 ${selectedIds.has(item.lich_su_phong_id) ? "bg-rose-50/50" : ""
+                }`}
+            >
+              <span className="flex items-center justify-center">
+                <Checkbox
+                  checked={selectedIds.has(item.lich_su_phong_id)}
+                  onCheckedChange={() => toggleSelect(item.lich_su_phong_id)}
+                />
+              </span>
               <div className="font-semibold text-slate-800">{item.ten_phong}</div>
               <div className="text-slate-600">
                 {formatDateTime(item.gio_bat_dau)} - {formatDateTime(item.gio_ket_thuc)}
               </div>
-              <div className="text-right text-base font-semibold text-slate-800">{item.tong_tien_thanh_toan.toLocaleString()}</div>
+              <div className="text-right text-base font-semibold text-slate-800">
+                {item.tong_tien_thanh_toan.toLocaleString()}
+              </div>
               <div className="text-right">
                 <button
                   type="button"
@@ -138,7 +283,13 @@ export function HistoryPage({
               )}
             </div>
           ))}
+          {histories.length === 0 && (
+            <div className="px-4 py-8 text-center text-sm text-slate-400">
+              Không có hóa đơn nào trong ngày đã chọn.
+            </div>
+          )}
         </div>
+
         <div className="app-card p-3">
           <h3 className="mb-2 text-base font-semibold text-slate-800">Chi tiết hóa đơn</h3>
           {historyItems.length === 0 && (
@@ -156,6 +307,8 @@ export function HistoryPage({
           ))}
         </div>
       </div>
+
+      {/* Detail modal */}
       {detailOpen && selectedHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
           <div className="w-[720px] max-w-[95vw] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
@@ -192,6 +345,76 @@ export function HistoryPage({
           </div>
         </div>
       )}
+
+      {/* AlertDialog: Confirm delete by IDs */}
+      <AlertDialog open={deleteIdsDialogOpen} onOpenChange={setDeleteIdsDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-rose-600">Xác nhận xóa hóa đơn</AlertDialogTitle>
+            <AlertDialogDescription>
+              Bạn sắp xóa <strong>{selectedIds.size}</strong> hóa đơn đã thanh toán.
+              Hành động này không thể hoàn tác. Dữ liệu sau khi xóa sẽ mất vĩnh viễn.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteByIds();
+              }}
+            >
+              {deleting ? "Đang xóa..." : "Xóa"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog: Confirm delete by date range */}
+      <AlertDialog open={deleteRangeDialogOpen} onOpenChange={setDeleteRangeDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-rose-600">Xóa hóa đơn theo khoảng ngày</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Bạn sắp xóa <strong>tất cả</strong> hóa đơn đã thanh toán từ{" "}
+                  <strong>{rangeStart}</strong> đến <strong>{rangeEnd}</strong>.
+                </p>
+                <p className="font-semibold text-rose-600">
+                  Hành động này không thể hoàn tác!
+                </p>
+                <p>
+                  Nhập <strong className="font-mono">XOA</strong> để xác nhận:
+                </p>
+                <input
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm font-mono tracking-widest"
+                  placeholder="Nhập XOA"
+                  value={rangeConfirmText}
+                  onChange={(e) => setRangeConfirmText(e.target.value.toUpperCase())}
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting} onClick={() => setRangeConfirmText("")}>
+              Hủy
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting || rangeConfirmText !== "XOA"}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteByRange();
+              }}
+            >
+              {deleting ? "Đang xóa..." : "Xóa theo khoảng ngày"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

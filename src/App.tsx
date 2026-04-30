@@ -8,6 +8,7 @@ import { PosPage } from "@/features/pos/PosPage";
 import { ProductsAdminPage } from "@/features/products/ProductsAdminPage";
 import { RoomsAdminPage } from "@/features/rooms/RoomsAdminPage";
 import { PrinterSettingsPage } from "@/features/settings/PrinterSettingsPage";
+import { Toaster } from "@/components/ui/sonner";
 import { useKaraoke } from "@/hooks/useKaraoke";
 import type { OrderItem, Product } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
@@ -589,6 +590,13 @@ function AppShell() {
                 }
                 return invoke<string>("reprint_history_bill", { historyId, printerAddr: printerTarget || null });
               }}
+              onDeleteByIds={async (ids) => {
+                return invoke<number>("delete_history_by_ids", { ids });
+              }}
+              onDeleteByRange={async (startDate, endDate) => {
+                return invoke<number>("delete_history_by_range", { startDate, endDate });
+              }}
+              onReloadHistory={() => karaoke.loadHistory(historyDate)}
             />
           }
         />
@@ -611,6 +619,7 @@ export default function App() {
   return (
     <HashRouter>
       <AppShell />
+      <Toaster position="top-right" richColors closeButton />
     </HashRouter>
   );
 }

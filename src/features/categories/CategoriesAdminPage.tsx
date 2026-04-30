@@ -3,6 +3,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
 import { Download, Plus, Search, Upload } from "lucide-react";
 import { Select } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { ProductGroup } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
 
@@ -42,6 +52,8 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTenNhom, setEditTenNhom] = useState("");
   const [editParentId, setEditParentId] = useState<string>("");
+  const [deleteTarget, setDeleteTarget] = useState<ProductGroup | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
 
   const filteredGroups = useMemo(
@@ -88,6 +100,17 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
       window.alert(formatInvokeError(e));
     } finally {
       setCsvBusy(false);
+    }
+  }
+
+  async function confirmDeleteGroup() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await onDelete(deleteTarget.nhom_san_pham_id);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -179,7 +202,10 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
                 >
                   Sửa
                 </button>
-                <button className="rounded-md bg-rose-100 px-3 py-1 text-rose-700" onClick={() => void onDelete(group.nhom_san_pham_id)}>
+                <button
+                  className="rounded-md bg-rose-100 px-3 py-1 text-rose-700"
+                  onClick={() => setDeleteTarget(group)}
+                >
                   Xóa
                 </button>
               </div>
@@ -286,6 +312,38 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
           </div>
         </div>
       )}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-rose-600">Xác nhận xóa nhóm sản phẩm</AlertDialogTitle>
+            <AlertDialogDescription>
+              Bạn có chắc chắn muốn xóa nhóm{" "}
+              <span className="font-semibold text-slate-900">
+                {deleteTarget?.ten_nhom ?? ""}
+              </span>
+              ? Hành động này không thể hoàn tác.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Hủy</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteGroup();
+              }}
+            >
+              {deleting ? "Đang xóa..." : "Xóa"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

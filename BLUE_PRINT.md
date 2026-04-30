@@ -247,6 +247,33 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
         3. **Ràng buộc:** Khi import sản phẩm, hệ thống phải kiểm tra `nhom_san_pham_id` có tồn tại trong bảng nhóm chưa. Nếu chưa, dòng đó sẽ bị bỏ qua và báo lỗi chi tiết.
         4. **Transaction:** Sử dụng `sqlx::Transaction` để đảm bảo nếu file có 100 dòng mà dòng 99 lỗi thì 98 dòng trước đó không bị lưu vào DB (giữ data sạch).
 
+### Feature 14: Xóa Lịch Sử Hóa Đơn (Delete Room History)
+
+**Mục tiêu:** Cho phép người dùng dọn dẹp các bản ghi trong `lich_su_phong` và các dữ liệu liên quan (`lich_su_phong_san_pham`).
+
+#### 1. Giao diện (UI)
+Nằm tại trang Quản lý lịch sử (`/admin/history`):
+*   **Checkbox Selection:** Thêm cột checkbox ở phía trước mỗi dòng trong bảng lịch sử để chọn từng hóa đơn.
+*   **Bulk Actions:** Một thanh công cụ xuất hiện khi có ít nhất một item được chọn, gồm nút **[Xóa mục đã chọn]**.
+*   **Range Picker & Delete:** Một khu vực chức năng cho phép chọn **Khoảng ngày (Từ ngày - Đến ngày)** và nút **[Xóa theo khoảng ngày]**.
+*   **Select All:** Checkbox ở header của bảng cho phép chọn toàn bộ danh sách đang hiển thị.
+
+#### 2. Logic xử lý (Backend - Rust)
+Tính năng này yêu cầu sự cẩn trọng cao để tránh xóa nhầm dữ liệu đang hoạt động.
+
+*   **Ràng buộc bảo mật:**
+    *   Chỉ được phép xóa các hóa đơn có `trang_thai = 'DA_THANH_TOAN'`.
+    *   Tuyệt đối không cho phép xóa hóa đơn đang ở trạng thái `DANG_PHUC_VU`.
+*   **Cơ chế xóa (Transaction):**
+    *   Khi xóa một `lich_su_phong_id`, hệ thống phải tự động xóa các bản ghi liên quan trong `lich_su_phong_san_pham` (Dựa trên `ON DELETE CASCADE` đã thiết kế ở DB).
+*   **Tauri IPC Commands:**
+    *   `invoke('delete_history_by_ids', { ids: number[] })`: Xóa danh sách các ID cụ thể.
+    *   `invoke('delete_history_by_range', { startDate, endDate })`: Xóa tất cả hóa đơn đã hoàn thành trong khoảng thời gian xác định.
+
+#### 3. Quy trình xác nhận (UX)
+*   **Cảnh báo nguy hiểm:** Vì dữ liệu sau khi xóa local sẽ không thể khôi phục, hệ thống phải hiện **Confirmation Dialog** với cảnh báo đỏ.
+*   **Xác nhận bằng mã/chữ:** Đối với hành động xóa hàng loạt theo ngày, có thể yêu cầu user nhập chữ "XOA" để xác nhận chắc chắn.
+
 
 ---
 

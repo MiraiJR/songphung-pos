@@ -46,6 +46,8 @@ pub fn run() {
             commands::get_current_session,
             commands::list_paid_history,
             commands::get_history_order_items,
+            commands::delete_history_by_ids,
+            commands::delete_history_by_range,
             csv_import::export_csv_templates,
             csv_import::export_nhom_san_pham_template,
             csv_import::export_san_pham_template,
