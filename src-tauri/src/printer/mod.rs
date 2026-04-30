@@ -5,6 +5,19 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+const WINDOWS_RAW_PRINT_PS1: &str = include_str!("windows_raw_print.ps1");
+
+/// Tránh bật cửa sổ PowerShell/console khi gọi từ ứng dụng GUI (Cài đặt, in, …).
+#[cfg(target_os = "windows")]
+fn powershell_command() -> Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = Command::new("powershell");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
 /// ESC/POS: init, bold on, body, bold off, feed, partial cut.
 fn receipt_print_bytes(content: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -39,7 +52,7 @@ pub fn check_network_printer_connection(printer_addr: &str) -> Result<(), String
 pub fn list_system_printers() -> Result<Vec<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("powershell")
+        let output = powershell_command()
             .args([
                 "-NoProfile",
                 "-Command",
@@ -85,22 +98,58 @@ fn is_network_target(target: &str) -> bool {
 fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let mut payload = String::with_capacity(content.len() + 24);
-        payload.push_str("\x1B\x40\x1B\x45\x01");
-        payload.push_str(content);
-        payload.push_str("\x1B\x45\x00\n\n\x1D\x56\x41\x10");
-        let escaped_content = payload.replace('\'', "''");
-        let escaped_printer = printer_name.replace('\'', "''");
-        let script = format!(
-            "$t = @'\n{escaped_content}\n'@; $t | Out-Printer -Name '{escaped_printer}'"
-        );
-        let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
+        // Không đưa byte ESC/POS (có byte \0 trong "ESC E 0") vào dòng lệnh PowerShell —
+        // Windows coi chuỗi lệnh là null-terminated nên gây lỗi "null byte found in provided data".
+        // Ghi file nhị phân + winspool WritePrinter (RAW) thay cho Out-Printer.
+        let bytes = receipt_print_bytes(content);
+        let temp = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let id = format!("{}_{stamp}", std::process::id());
+        let prn_path = temp.join(format!("songphung_{id}.prn"));
+        let ps1_path = temp.join(format!("songphung_{id}.ps1"));
+
+        std::fs::write(&prn_path, &bytes).map_err(|e| format!("Không ghi file in tạm: {e}"))?;
+        std::fs::write(&ps1_path, WINDOWS_RAW_PRINT_PS1)
+            .map_err(|e| format!("Không ghi script in tạm: {e}"))?;
+
+        let prn_str = prn_path.to_str().ok_or_else(|| {
+            "Đường dẫn file in tạm không hợp lệ (UTF-8).".to_string()
+        })?;
+        let ps1_str = ps1_path.to_str().ok_or_else(|| {
+            "Đường dẫn script in tạm không hợp lệ (UTF-8).".to_string()
+        })?;
+
+        let output = powershell_command()
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                ps1_str,
+                "-Path",
+                prn_str,
+                "-Printer",
+                printer_name,
+            ])
             .output()
-            .map_err(|e| format!("Không in được tới máy in hệ thống: {e}"))?;
+            .map_err(|e| format!("Không chạy PowerShell để in RAW: {e}"))?;
+
+        let _ = std::fs::remove_file(&ps1_path);
         if !output.status.success() {
-            return Err("Lệnh in máy in hệ thống thất bại".to_string());
+            let _ = std::fs::remove_file(&prn_path);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = format!("{stderr}{stdout}").trim().to_string();
+            return Err(if detail.is_empty() {
+                "Lệnh in máy in hệ thống thất bại.".to_string()
+            } else {
+                format!("Lệnh in máy in hệ thống thất bại: {detail}")
+            });
         }
+        let _ = std::fs::remove_file(&prn_path);
         return Ok(());
     }
 
