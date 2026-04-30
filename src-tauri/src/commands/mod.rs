@@ -184,6 +184,40 @@ fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, 
         })
 }
 
+/// Convert "YYYY-MM-DD HH:MM:SS" → "DD/MM/YYYY hh:mm AM/PM"
+fn format_datetime_receipt(raw: &str) -> String {
+    let parts: Vec<&str> = raw.trim().splitn(2, ' ').collect();
+    let (date_part, time_part) = match parts.as_slice() {
+        [d, t] => (*d, *t),
+        [d] => (*d, "00:00:00"),
+        _ => return raw.to_string(),
+    };
+
+    let ymd: Vec<&str> = date_part.split('-').collect();
+    let formatted_date = if ymd.len() == 3 {
+        format!("{}/{}/{}", ymd[2], ymd[1], ymd[0])
+    } else {
+        date_part.to_string()
+    };
+
+    let hms: Vec<&str> = time_part.split(':').collect();
+    let formatted_time = if hms.len() >= 2 {
+        let hour: u32 = hms[0].parse().unwrap_or(0);
+        let minute = hms[1];
+        let (h12, ampm) = match hour {
+            0 => (12, "AM"),
+            1..=11 => (hour, "AM"),
+            12 => (12, "PM"),
+            _ => (hour - 12, "PM"),
+        };
+        format!("{:02}:{} {}", h12, minute, ampm)
+    } else {
+        time_part.to_string()
+    };
+
+    format!("{} {}", formatted_date, formatted_time)
+}
+
 fn format_currency(value: f64) -> String {
     let mut digits = (value.round() as i64).abs().to_string();
     let mut grouped = String::new();
@@ -231,7 +265,12 @@ fn compose_receipt_bill(
         "Phòng {room_name} ({room_name})"
     )));
     content.push_str(&rf::lines_wrapped_centered(&format!(
-        "Thời gian: {started_at} - {ended_at}"
+        "Bắt đầu: {}",
+        format_datetime_receipt(started_at)
+    )));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Kết thúc: {}",
+        format_datetime_receipt(ended_at)
     )));
     content.push_str(&rf::line_two_cols(
         "Nhân viên: Admin",
@@ -280,16 +319,13 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         data.room_name, data.room_name
     )));
     content.push_str(&rf::lines_wrapped_centered(&format!(
-        "Thời gian: {} - {}",
-        data.gio_bat_dau, data.gio_hien_tai
+        "Bắt đầu: {}",
+        format_datetime_receipt(&data.gio_bat_dau)
     )));
-    content.push_str(&rf::line_two_cols(
-        "Nhân viên: Admin",
-        &format!("Tham chiếu: {:05}", data.lich_su_phong_id),
-    ));
-    content.push_str(&rf::lines_wrapped_centered(
-        "(Chưa thanh toán - chỉ tham khảo)",
-    ));
+    content.push_str(&rf::lines_wrapped_centered(&format!(
+        "Kết thúc: {}",
+        format_datetime_receipt(&data.gio_hien_tai)
+    )));
     content.push_str(&rf::line_sep());
     content.push_str(&rf::line_item_header());
     for item in &data.items {
@@ -306,7 +342,7 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         &format_currency(data.tong_tien_san_pham),
     ));
     content.push_str(&rf::line_total(
-        "TIỀN GIỜ (tạm tính):",
+        "TIỀN GIỜ:",
         &format_currency(data.tong_tien_gio),
     ));
     content.push_str(&rf::line_total(
@@ -348,8 +384,8 @@ fn compose_printer_test_sample_receipt() -> String {
     compose_receipt_bill(
         1,
         "P1",
-        "29/04/2026 05:46 PM",
-        "07:24 PM",
+        "2026-04-29 17:46:00",
+        "2026-04-29 19:24:00",
         &items,
         206_000.0,
         245_000.0,
