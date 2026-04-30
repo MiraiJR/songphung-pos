@@ -1,9 +1,9 @@
 //! Fixed-width receipt lines for 80mm thermal printer.
 
-pub const RECEIPT_WIDTH: usize = 33;
+pub const RECEIPT_WIDTH: usize = 32;
 
 /// Width for large-font payment summary lines (fewer chars fit at bigger font).
-const LARGE_WIDTH: usize = 24;
+const LARGE_WIDTH: usize = 23;
 
 /// Prefix that tells the print script to use larger font for this line.
 const LARGE_MARKER: &str = "@@LARGE@@";
