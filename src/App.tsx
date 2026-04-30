@@ -10,6 +10,7 @@ import { RoomsAdminPage } from "@/features/rooms/RoomsAdminPage";
 import { PrinterSettingsPage } from "@/features/settings/PrinterSettingsPage";
 import { useKaraoke } from "@/hooks/useKaraoke";
 import type { OrderItem, Product } from "@/types/karaoke";
+import { formatInvokeError } from "@/utils/invokeError";
 
 type PrinterConnectionStatus = {
   connected: boolean;
@@ -18,8 +19,40 @@ type PrinterConnectionStatus = {
 };
 const PRINTER_STORAGE_KEY = "songphung_printer_target";
 
+function todayLocalYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Hiển thị số tiền trong ô nhập (dấu phẩy phân tách hàng nghìn). */
+function formatAmountDigits(digits: string): string {
+  if (!digits) return "";
+  const n = Number(digits);
+  if (!Number.isFinite(n)) return "";
+  return n.toLocaleString("en-US");
+}
+
+function parseAmountInput(value: string): number {
+  const digits = value.replace(/\D/g, "");
+  if (digits === "") return Number.NaN;
+  return Number(digits);
+}
+
+function formatLocalDateTimeForBill(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function alertInvokeError(error: unknown, prefix?: string) {
+  const msg = formatInvokeError(error);
+  window.alert(prefix ? `${prefix} ${msg}` : msg);
+}
+
 function AppShell() {
-  const [historyDate, setHistoryDate] = useState("");
+  const [historyDate, setHistoryDate] = useState(() => todayLocalYmd());
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
@@ -34,8 +67,29 @@ function AppShell() {
   const karaoke = useKaraoke();
 
   useEffect(() => {
-    setPrinterTarget(localStorage.getItem(PRINTER_STORAGE_KEY) ?? "");
+    void (async () => {
+      const saved = (localStorage.getItem(PRINTER_STORAGE_KEY) ?? "").trim();
+      if (saved) {
+        setPrinterTarget(saved);
+        return;
+      }
+      try {
+        const printers = await invoke<string[]>("get_system_printers");
+        const firstPrinter = printers.find((name) => name.trim().length > 0) ?? "";
+        if (firstPrinter) {
+          setPrinterTarget(firstPrinter);
+          localStorage.setItem(PRINTER_STORAGE_KEY, firstPrinter);
+        }
+      } catch {
+        setPrinterTarget("");
+      }
+    })();
   }, []);
+
+  useEffect(() => {
+    if (!historyDate) return;
+    void karaoke.loadHistory(historyDate);
+  }, [historyDate, karaoke.loadHistory]);
 
   function updatePrinterTarget(value: string) {
     setPrinterTarget(value);
@@ -47,6 +101,51 @@ function AppShell() {
     await karaoke.loadMasterData();
     karaoke.setSelectedRoomId(roomId);
     await karaoke.loadCurrentSession(roomId);
+  }
+
+  async function handleTransferRoom(targetRoomId: number) {
+    if (!karaoke.currentSession || karaoke.selectedRoomId == null) return;
+    await invoke("transfer_room", {
+      payload: {
+        history_id: karaoke.currentSession.lich_su_phong_id,
+        source_room_id: karaoke.selectedRoomId,
+        target_room_id: targetRoomId,
+      },
+    });
+    await karaoke.loadMasterData();
+    karaoke.setSelectedRoomId(targetRoomId);
+    await karaoke.loadCurrentSession(targetRoomId);
+  }
+
+  async function handlePrintTemporaryBill() {
+    if (karaoke.selectedRoom?.trang_thai !== "DANG_HOAT_DONG" || !karaoke.currentSession) {
+      window.alert("Chỉ in phiếu tạm tính khi phòng đang hoạt động.");
+      return;
+    }
+    const s = karaoke.currentSession;
+    const gio_hien_tai = formatLocalDateTimeForBill(new Date());
+    try {
+      await invoke("print_temporary_bill", {
+        data: {
+          room_name: s.ten_phong,
+          gio_bat_dau: s.gio_bat_dau,
+          gio_hien_tai,
+          lich_su_phong_id: s.lich_su_phong_id,
+          items: s.items.map((row) => ({
+            ten_san_pham: row.ten_san_pham,
+            so_luong: row.so_luong,
+            don_gia: row.don_gia,
+            thanh_tien: row.thanh_tien,
+          })),
+          tong_tien_san_pham: s.tong_tien_san_pham,
+          tong_tien_gio: s.tong_tien_gio,
+          tong_tam_tinh: s.tong_tien_thanh_toan,
+        },
+        printer_name_or_ip: printerTarget.trim() ? printerTarget.trim() : null,
+      });
+    } catch (error) {
+      alertInvokeError(error, "Không in được phiếu tạm tính:");
+    }
   }
 
   function openOrderModal(product: Product, initialQty: number) {
@@ -153,7 +252,7 @@ function AppShell() {
       return;
     }
     const defaultAmount = Math.ceil(karaoke.currentSession.tong_tien_thanh_toan);
-    setCheckoutAmount(String(defaultAmount));
+    setCheckoutAmount(formatAmountDigits(String(defaultAmount)));
     setCheckoutPrintReceipt(true);
     setPrinterConnected(null);
     setPrinterMessage("");
@@ -186,7 +285,7 @@ function AppShell() {
 
   async function confirmCheckout() {
     if (!karaoke.currentSession || !karaoke.selectedRoomId) return;
-    const finalAmount = Number(checkoutAmount);
+    const finalAmount = parseAmountInput(checkoutAmount);
     if (Number.isNaN(finalAmount) || finalAmount < 0) {
       window.alert("Thành tiền không hợp lệ.");
       return;
@@ -239,6 +338,8 @@ function AppShell() {
                 onRemoveItem={handleRemoveItem}
                 onCancelRoom={requestCancelRoom}
                 onCheckout={requestCheckout}
+                onTransferRoom={handleTransferRoom}
+                onPrintTemporaryBill={handlePrintTemporaryBill}
               />
               {orderModalOpen && selectedProduct && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
@@ -332,7 +433,11 @@ function AppShell() {
                       <input
                         className="w-full rounded border px-3 py-2 text-right text-xl"
                         value={checkoutAmount}
-                        onChange={(e) => setCheckoutAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, "");
+                          setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
+                        }}
+                        inputMode="numeric"
                       />
                     </div>
                     <label className="mt-3 inline-flex items-center gap-2 text-sm">

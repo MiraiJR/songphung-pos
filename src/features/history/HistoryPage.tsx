@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import type { HistoryOrderItem, PaidHistory } from "@/types/karaoke";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   histories: PaidHistory[];
@@ -45,9 +46,13 @@ export function HistoryPage({
         </div>
         <div className="flex items-center gap-2">
           <DatePicker value={historyDate} onChange={onDateChange} />
-          <button className="btn-primary" onClick={onFilter}>
+          <Button
+            className="h-[48px]"
+            variant="default"
+            onClick={onFilter}
+          >
             Lọc
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -62,15 +67,14 @@ export function HistoryPage({
 
       {reprintStatus && (
         <div
-          className={`mb-3 rounded px-3 py-2 text-sm ${
-            reprintStatus.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-          }`}
+          className={`mb-3 rounded px-3 py-2 text-sm ${reprintStatus.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+            }`}
         >
           {reprintStatus.message}
         </div>
       )}
       <div className="grid grid-cols-3 gap-3">
-        <div className="app-card col-span-2 overflow-hidden">
+        <div className="app-card col-span-2 overflow-visible">
           <div className="grid grid-cols-[1.2fr,1.4fr,1fr,1fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
             <span>Phòng</span>
             <span>Thời gian</span>
@@ -96,7 +100,7 @@ export function HistoryPage({
                 </button>
               </div>
               {menuHistoryId === item.lich_su_phong_id && (
-                <div className="absolute right-4 top-12 z-10 w-44 rounded border border-slate-200 bg-white p-1 shadow">
+                <div className="absolute right-4 top-full z-50 mt-1 w-44 rounded border border-slate-200 bg-white p-1 shadow-lg">
                   <button
                     type="button"
                     className="w-full rounded px-2 py-1 text-left hover:bg-slate-100"

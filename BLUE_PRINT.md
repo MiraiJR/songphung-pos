@@ -222,6 +222,16 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     * Ở **Feature 4 (Thanh toán)**, khi gọi lệnh `checkout_room`, Frontend sẽ lấy giá trị máy in từ `localStorage` để truyền kèm vào IPC command cho Backend biết phải in hóa đơn ra máy nào. 
     * Mỗi lần app khởi động, trạng thái máy in sẽ tự động đọc từ `localStorage` và báo cho người dùng biết trên giao diện.
 
+### Feature 12: In phiếu tạm tính (Print Pro-forma Invoice)
+* **Mục đích:** Chỉ in hóa đơn để khách xem, không đóng phòng, không cập nhật trạng thái thanh toán.
+* **Trigger:** Click nút **[In phiếu]** trên Panel Left.
+* **Logic xử lý:**
+    1. Frontend lấy toàn bộ thông tin hiện tại: Danh sách món, Giờ bắt đầu, Giờ hiện tại (để tính tiền giờ tạm tính).
+    2. Gọi IPC Command: `invoke('print_temporary_bill', { data, printerNameOrIp })`.
+    3. Backend Rust nhận data, format template tương tự hóa đơn thật nhưng có tiêu đề là **"PHIẾU TẠM TÍNH"**.
+    4. Gửi lệnh tới máy in.
+* **Ràng buộc:** Chỉ áp dụng cho phòng đang `DANG_HOAT_DONG`. Không thực hiện bất kỳ câu lệnh `UPDATE` nào vào Database.
+
 ---
 
 ## 5. TỐI ƯU HIỆU SUẤT (Windows OS / Tauri Tips)

@@ -18,6 +18,8 @@ type Props = {
   onRemoveItem: (item: OrderItem) => void;
   onCancelRoom: () => void;
   onCheckout: () => void;
+  onTransferRoom: (targetRoomId: number) => Promise<void>;
+  onPrintTemporaryBill: () => Promise<void>;
 };
 
 export function PosPage(props: Props) {
@@ -36,9 +38,13 @@ export function PosPage(props: Props) {
     onRemoveItem,
     onCancelRoom,
     onCheckout,
+    onTransferRoom,
+    onPrintTemporaryBill,
   } = props;
   const [keyword, setKeyword] = useState("");
   const [activeGroupId, setActiveGroupId] = useState<string>("ALL");
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferSubmitting, setTransferSubmitting] = useState(false);
 
   const groupTabs = useMemo(() => {
     const base = groups
@@ -73,6 +79,11 @@ export function PosPage(props: Props) {
   const totalDurationLabel =
     totalHoursPart <= 0 ? `${totalMinutesPart} phút` : `${totalHoursPart} giờ ${totalMinutesPart} phút`;
 
+  const emptyRoomsForTransfer = useMemo(
+    () => rooms.filter((r) => r.trang_thai === "TRONG" && r.phong_id !== selectedRoomId),
+    [rooms, selectedRoomId],
+  );
+
   return (
     <section className="grid h-[calc(100vh-61px)] grid-cols-10 gap-3 bg-slate-100 p-3">
       <aside className="app-card col-span-3 flex flex-col overflow-hidden p-0">
@@ -94,19 +105,19 @@ export function PosPage(props: Props) {
         <div className="flex-1 space-y-2 overflow-auto p-3">
           {currentSession?.items.map((item) => (
             <div key={item.lich_su_phong_san_pham_id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-              <div className="grid grid-cols-[56px,1fr,100px] gap-2 text-sm">
-                <div className="flex items-center gap-1 text-slate-600">
+              <div className="grid grid-cols-[auto,1fr,100px] gap-2 text-sm">
+                <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-slate-600">
                   <button
                     type="button"
-                    className="inline-flex h-6 w-6 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
                     onClick={() => onAdjustItemQty(item, -1)}
                   >
                     -
                   </button>
-                  <span className="font-semibold">{item.so_luong}</span>
+                  <span className="min-w-[1ch] tabular-nums font-semibold">{item.so_luong}</span>
                   <button
                     type="button"
-                    className="inline-flex h-6 w-6 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
                     onClick={() => onAdjustItemQty(item, 1)}
                   >
                     +
@@ -167,14 +178,47 @@ export function PosPage(props: Props) {
                 {Math.ceil(currentSession?.tong_tien_thanh_toan ?? 0).toLocaleString()}
               </span>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button className="btn-danger flex-1" onClick={onCancelRoom}>
-                Trả phòng
+            {currentSession ? (
+              <>
+                <div className="mt-3 grid w-full grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="btn-primary min-w-0 w-full text-sm"
+                    onClick={() => void onPrintTemporaryBill()}
+                  >
+                    In phiếu
+                  </button>
+                  <button type="button" className="btn-danger min-w-0 w-full" onClick={onCancelRoom}>
+                    Trả phòng
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary mt-2 w-full"
+                  onClick={onCheckout}
+                >
+                  Thanh toán
+                </button>
+              </>
+            ) : (
+              <div className="mt-3 grid w-full grid-cols-2 gap-2">
+                <button type="button" className="btn-danger min-w-0 w-full" onClick={onCancelRoom}>
+                  Trả phòng
+                </button>
+                <button type="button" className="btn-secondary min-w-0 w-full" onClick={onCheckout}>
+                  Thanh toán
+                </button>
+              </div>
+            )}
+            {currentSession && (
+              <button
+                type="button"
+                className="btn-ghost mt-2 w-full border border-slate-200 text-sm"
+                onClick={() => setTransferModalOpen(true)}
+              >
+                Chuyển phòng
               </button>
-              <button className="btn-secondary flex-1" onClick={onCheckout}>
-                Thanh toán
-              </button>
-            </div>
+            )}
           </div>
         )}
       </aside>
@@ -244,6 +288,61 @@ export function PosPage(props: Props) {
           ))}
         </div>
       </aside>
+
+      {transferModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
+          <div className="w-[420px] max-w-[95vw] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <h3 className="mb-2 text-lg font-semibold text-slate-800">Chuyển phòng</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Chọn phòng trống để chuyển toàn bộ phiên và món đang gọi sang phòng đích.
+            </p>
+            {emptyRoomsForTransfer.length === 0 ? (
+              <div className="rounded-md border border-dashed border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
+                Hiện không còn phòng trống. Vui lòng thử lại sau.
+              </div>
+            ) : (
+              <div className="max-h-[280px] space-y-2 overflow-auto">
+                {emptyRoomsForTransfer.map((room) => (
+                  <button
+                    key={room.phong_id}
+                    type="button"
+                    disabled={transferSubmitting}
+                    className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary/40 hover:bg-white disabled:opacity-50"
+                    onClick={() => {
+                      void (async () => {
+                        setTransferSubmitting(true);
+                        try {
+                          await onTransferRoom(room.phong_id);
+                          setTransferModalOpen(false);
+                        } catch (err) {
+                          window.alert(String(err));
+                        } finally {
+                          setTransferSubmitting(false);
+                        }
+                      })();
+                    }}
+                  >
+                    <span className="font-semibold text-slate-800">{room.ten_phong}</span>
+                    <span className="text-xs text-slate-500">
+                      {Math.ceil(room.tien_gio).toLocaleString()} đ/giờ
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={transferSubmitting}
+                onClick={() => setTransferModalOpen(false)}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

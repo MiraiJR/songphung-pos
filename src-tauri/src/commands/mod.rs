@@ -132,6 +132,183 @@ pub struct CheckoutPayload {
     pub printer_name_or_ip: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TransferRoomPayload {
+    pub history_id: i64,
+    pub source_room_id: i64,
+    pub target_room_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemporaryBillLine {
+    pub ten_san_pham: String,
+    pub so_luong: i64,
+    pub don_gia: f64,
+    pub thanh_tien: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemporaryBillData {
+    pub room_name: String,
+    pub gio_bat_dau: String,
+    pub gio_hien_tai: String,
+    pub lich_su_phong_id: i64,
+    pub items: Vec<TemporaryBillLine>,
+    pub tong_tien_san_pham: f64,
+    pub tong_tien_gio: f64,
+    pub tong_tam_tinh: f64,
+}
+
+fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, String> {
+    if let Some(target) = printer_name_or_ip {
+        let trimmed = target.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    if let Ok(env_target) = std::env::var("PRINTER_ADDR") {
+        let trimmed = env_target.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let printers = crate::printer::list_system_printers()?;
+    printers
+        .into_iter()
+        .find(|name| !name.trim().is_empty())
+        .ok_or_else(|| {
+            "Chưa cấu hình máy in và không tìm thấy máy in hệ thống. Vào Cài đặt để chọn máy in."
+                .to_string()
+        })
+}
+
+fn format_currency(value: f64) -> String {
+    let mut digits = (value.round() as i64).abs().to_string();
+    let mut grouped = String::new();
+    while digits.len() > 3 {
+        let chunk = digits.split_off(digits.len() - 3);
+        if grouped.is_empty() {
+            grouped = chunk;
+        } else {
+            grouped = format!("{chunk},{grouped}");
+        }
+    }
+    if grouped.is_empty() {
+        grouped = digits;
+    } else {
+        grouped = format!("{digits},{grouped}");
+    }
+    if value < 0.0 {
+        format!("-{grouped}")
+    } else {
+        grouped
+    }
+}
+
+fn fit_text(text: &str, width: usize) -> String {
+    let mut out = String::new();
+    for ch in text.chars().take(width) {
+        out.push(ch);
+    }
+    let current = out.chars().count();
+    if current < width {
+        out.push_str(&" ".repeat(width - current));
+    }
+    out
+}
+
+fn compose_receipt_bill(
+    history_id: i64,
+    room_name: &str,
+    started_at: &str,
+    ended_at: &str,
+    items: &[HistoryOrderItem],
+    total_product: f64,
+    total_hour: f64,
+    total_paid: f64,
+) -> String {
+    let mut content = String::new();
+    content.push_str("      KARAOKE SONG PHỤNG 2\n");
+    content.push_str("373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH\n");
+    content.push_str("         ĐT: 0974 089 367\n");
+    content.push_str("\n");
+    content.push_str("         PHIẾU THANH TOÁN\n");
+    content.push_str(&format!("Phòng {room_name} ({room_name})\n"));
+    content.push_str(&format!("Thời gian: {started_at} - {ended_at}\n"));
+    content.push_str(&format!("Nhân viên: Admin   Số HĐ: {:05}\n", history_id));
+    content.push_str("--------------------------------\n");
+    content.push_str("Mặt hàng          SL   Đ.GIÁ T.TIỀN\n");
+    for item in items {
+        let item_name = fit_text(&item.ten_san_pham, 16);
+        let qty = format!("{:>3}", item.so_luong);
+        let price = fit_text(&format_currency(item.don_gia), 6);
+        let amount = fit_text(&format_currency(item.thanh_tien), 7);
+        content.push_str(&format!("{item_name} {qty} {price} {amount}\n"));
+    }
+    content.push_str("--------------------------------\n");
+    content.push_str(&format!(
+        "TỔNG CỘNG: {:>20}\n",
+        format_currency(total_product)
+    ));
+    content.push_str(&format!(
+        "TIỀN GIỜ: {:>21}\n",
+        format_currency(total_hour)
+    ));
+    content.push_str(&format!(
+        "TIỀN MẶT (đ): {:>16}\n",
+        format_currency(total_paid)
+    ));
+    content.push_str("--------------------------------\n");
+    content.push_str(" HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!\n");
+    content
+}
+
+fn compose_temporary_bill(data: &TemporaryBillData) -> String {
+    let mut content = String::new();
+    content.push_str("      KARAOKE SONG PHỤNG 2\n");
+    content.push_str("373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH\n");
+    content.push_str("         ĐT: 0974 089 367\n");
+    content.push_str("\n");
+    content.push_str("        PHIẾU TẠM TÍNH\n");
+    content.push_str(&format!("Phòng {} ({})\n", data.room_name, data.room_name));
+    content.push_str(&format!(
+        "Thời gian: {} - {}\n",
+        data.gio_bat_dau, data.gio_hien_tai
+    ));
+    content.push_str(&format!(
+        "Nhân viên: Admin   Tham chiếu: {:05}\n",
+        data.lich_su_phong_id
+    ));
+    content.push_str("(Chưa thanh toán - chỉ tham khảo)\n");
+    content.push_str("--------------------------------\n");
+    content.push_str("Mặt hàng          SL   Đ.GIÁ T.TIỀN\n");
+    for item in &data.items {
+        let item_name = fit_text(&item.ten_san_pham, 16);
+        let qty = format!("{:>3}", item.so_luong);
+        let price = fit_text(&format_currency(item.don_gia), 6);
+        let amount = fit_text(&format_currency(item.thanh_tien), 7);
+        content.push_str(&format!("{item_name} {qty} {price} {amount}\n"));
+    }
+    content.push_str("--------------------------------\n");
+    content.push_str(&format!(
+        "TỔNG CỘNG: {:>20}\n",
+        format_currency(data.tong_tien_san_pham)
+    ));
+    content.push_str(&format!(
+        "TIỀN GIỜ (tạm tính): {:>18}\n",
+        format_currency(data.tong_tien_gio)
+    ));
+    content.push_str(&format!(
+        "TỔNG TẠM TÍNH:      {:>18}\n",
+        format_currency(data.tong_tam_tinh)
+    ));
+    content.push_str("--------------------------------\n");
+    content.push_str(" HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!\n");
+    content
+}
+
 #[tauri::command]
 pub async fn health_check(state: tauri::State<'_, DbState>) -> Result<String, String> {
     sqlx::query_scalar::<_, i64>("SELECT 1")
@@ -430,6 +607,96 @@ pub async fn start_room(state: tauri::State<'_, DbState>, room_id: i64) -> Resul
 }
 
 #[tauri::command]
+pub async fn transfer_room(
+    state: tauri::State<'_, DbState>,
+    payload: TransferRoomPayload,
+) -> Result<(), String> {
+    if payload.source_room_id == payload.target_room_id {
+        return Err("Phòng nguồn và phòng đích phải khác nhau".to_string());
+    }
+
+    let pool = state.pool();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let hist = sqlx::query(
+        "SELECT phong_id, trang_thai FROM lich_su_phong WHERE lich_su_phong_id = ?",
+    )
+    .bind(payload.history_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy phiên phục vụ".to_string())?;
+
+    let hist_phong_id: i64 = hist.try_get("phong_id").map_err(|e| e.to_string())?;
+    let hist_status: String = hist.try_get("trang_thai").map_err(|e| e.to_string())?;
+    if hist_phong_id != payload.source_room_id {
+        return Err("Phiên không thuộc phòng nguồn đã chọn".to_string());
+    }
+    if hist_status != "DANG_PHUC_VU" {
+        return Err("Phiên không còn đang phục vụ".to_string());
+    }
+
+    let src_status_row =
+        sqlx::query("SELECT trang_thai FROM phong WHERE phong_id = ?")
+            .bind(payload.source_room_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Không tìm thấy phòng nguồn".to_string())?;
+    let src_status: String = src_status_row
+        .try_get("trang_thai")
+        .map_err(|e| e.to_string())?;
+    if src_status != "DANG_HOAT_DONG" {
+        return Err("Phòng nguồn không đang hoạt động".to_string());
+    }
+
+    let tgt = sqlx::query("SELECT tien_gio, trang_thai FROM phong WHERE phong_id = ?")
+        .bind(payload.target_room_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Không tìm thấy phòng đích".to_string())?;
+    let target_tien_gio: f64 = tgt.try_get("tien_gio").map_err(|e| e.to_string())?;
+    let tgt_status: String = tgt.try_get("trang_thai").map_err(|e| e.to_string())?;
+    if tgt_status != "TRONG" {
+        return Err("Phòng đích không trống".to_string());
+    }
+
+    let u1 = sqlx::query(
+        "UPDATE lich_su_phong SET phong_id = ?, tien_gio = ? WHERE lich_su_phong_id = ?",
+    )
+    .bind(payload.target_room_id)
+    .bind(target_tien_gio)
+    .bind(payload.history_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    if u1.rows_affected() == 0 {
+        return Err("Không cập nhật được phiên phục vụ".to_string());
+    }
+
+    sqlx::query("UPDATE phong SET trang_thai = 'TRONG' WHERE phong_id = ?")
+        .bind(payload.source_room_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let u3 = sqlx::query(
+        "UPDATE phong SET trang_thai = 'DANG_HOAT_DONG' WHERE phong_id = ? AND trang_thai = 'TRONG'",
+    )
+    .bind(payload.target_room_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    if u3.rows_affected() == 0 {
+        return Err("Không cập nhật được trạng thái phòng đích".to_string());
+    }
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_active_history_id(state: tauri::State<'_, DbState>, room_id: i64) -> Result<Option<i64>, String> {
     sqlx::query_scalar::<_, i64>(
         "SELECT lich_su_phong_id
@@ -589,16 +856,51 @@ pub async fn checkout_room(
         .await
         .map_err(|e| e.to_string())?;
 
+    let checkout_bill = sqlx::query(
+        "SELECT lsp.lich_su_phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc
+         FROM lich_su_phong lsp
+         JOIN phong p ON p.phong_id = lsp.phong_id
+         WHERE lsp.lich_su_phong_id = ?",
+    )
+    .bind(payload.history_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let checkout_items = sqlx::query_as::<_, HistoryOrderItem>(
+        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong, ct.don_gia, (ct.so_luong * ct.don_gia) AS thanh_tien
+         FROM lich_su_phong_san_pham ct
+         JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
+         WHERE ct.lich_su_phong_id = ?
+         ORDER BY sp.ten_san_pham",
+    )
+    .bind(payload.history_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
     tx.commit().await.map_err(|e| e.to_string())?;
 
     if payload.print_receipt {
-        let preview = crate::printer::render_receipt_preview();
-        let target = payload
-            .printer_name_or_ip
-            .clone()
-            .filter(|v| !v.trim().is_empty())
-            .unwrap_or_else(|| std::env::var("PRINTER_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".to_string()));
-        let _ = crate::printer::print_receipt_to_target(&target, &preview);
+        let target = resolve_printer_target(payload.printer_name_or_ip.clone())?;
+        let content = compose_receipt_bill(
+            payload.history_id,
+            &checkout_bill
+                .try_get::<String, _>("ten_phong")
+                .map_err(|e| e.to_string())?,
+            &checkout_bill
+                .try_get::<String, _>("gio_bat_dau")
+                .map_err(|e| e.to_string())?,
+            &checkout_bill
+                .try_get::<Option<String>, _>("gio_ket_thuc")
+                .map_err(|e| e.to_string())?
+                .unwrap_or_else(|| "--".to_string()),
+            &checkout_items,
+            tong_tien_san_pham,
+            tong_tien_gio,
+            payload.final_amount,
+        );
+        let _ = crate::printer::print_receipt_to_target(&target, &content);
     }
     Ok(())
 }
@@ -722,9 +1024,7 @@ pub async fn get_history_order_items(
 pub async fn check_printer_connection(
     printer_addr: Option<String>,
 ) -> Result<PrinterConnectionStatus, String> {
-    let address = printer_addr
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| std::env::var("PRINTER_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".to_string()));
+    let address = resolve_printer_target(printer_addr)?;
 
     match crate::printer::check_printer_target_connection(&address) {
         Ok(_) => Ok(PrinterConnectionStatus {
@@ -758,15 +1058,25 @@ pub async fn test_printer(printer_name_or_ip: String) -> Result<String, String> 
 }
 
 #[tauri::command]
+pub async fn print_temporary_bill(
+    data: TemporaryBillData,
+    printer_name_or_ip: Option<String>,
+) -> Result<String, String> {
+    let target = resolve_printer_target(printer_name_or_ip)?;
+    crate::printer::check_printer_target_connection(&target)?;
+    let content = compose_temporary_bill(&data);
+    crate::printer::print_receipt_to_target(&target, &content)?;
+    Ok("Đã in phiếu tạm tính.".to_string())
+}
+
+#[tauri::command]
 pub async fn reprint_history_bill(
     state: tauri::State<'_, DbState>,
     history_id: i64,
     printer_addr: Option<String>,
 ) -> Result<String, String> {
     let pool = state.pool();
-    let address = printer_addr
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| std::env::var("PRINTER_ADDR").unwrap_or_else(|_| "127.0.0.1:9100".to_string()));
+    let address = resolve_printer_target(printer_addr)?;
 
     crate::printer::check_printer_target_connection(&address)?;
 
@@ -798,48 +1108,24 @@ pub async fn reprint_history_bill(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut content = String::new();
-    content.push_str("SONG PHUNG KARAOKE\n");
-    content.push_str("Dia chi: Song Phung\n");
-    content.push_str("------------------------------\n");
-    content.push_str(&format!(
-        "Phong: {}\n",
-        bill.try_get::<String, _>("ten_phong").map_err(|e| e.to_string())?
-    ));
-    content.push_str(&format!(
-        "Gio vao: {}\n",
-        bill.try_get::<String, _>("gio_bat_dau").map_err(|e| e.to_string())?
-    ));
-    content.push_str(&format!(
-        "Gio ra: {}\n",
-        bill.try_get::<Option<String>, _>("gio_ket_thuc")
+    let content = compose_receipt_bill(
+        history_id,
+        &bill.try_get::<String, _>("ten_phong")
+            .map_err(|e| e.to_string())?,
+        &bill.try_get::<String, _>("gio_bat_dau")
+            .map_err(|e| e.to_string())?,
+        &bill
+            .try_get::<Option<String>, _>("gio_ket_thuc")
             .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "--".to_string())
-    ));
-    content.push_str("------------------------------\n");
-    for item in items {
-        content.push_str(&format!(
-            "{} | {} x {} = {}\n",
-            item.ten_san_pham,
-            item.so_luong,
-            item.don_gia as i64,
-            item.thanh_tien as i64
-        ));
-    }
-    content.push_str("------------------------------\n");
-    content.push_str(&format!(
-        "Tien mon: {}\n",
-        bill.try_get::<f64, _>("tong_tien_san_pham").map_err(|e| e.to_string())? as i64
-    ));
-    content.push_str(&format!(
-        "Tien gio: {}\n",
-        bill.try_get::<f64, _>("tong_tien_gio").map_err(|e| e.to_string())? as i64
-    ));
-    content.push_str(&format!(
-        "Tong cong: {}\n",
-        bill.try_get::<f64, _>("tong_tien_thanh_toan").map_err(|e| e.to_string())? as i64
-    ));
-    content.push_str("Cam on quy khach!\n");
+            .unwrap_or_else(|| "--".to_string()),
+        &items,
+        bill.try_get::<f64, _>("tong_tien_san_pham")
+            .map_err(|e| e.to_string())?,
+        bill.try_get::<f64, _>("tong_tien_gio")
+            .map_err(|e| e.to_string())?,
+        bill.try_get::<f64, _>("tong_tien_thanh_toan")
+            .map_err(|e| e.to_string())?,
+    );
 
     crate::printer::print_receipt_to_target(&address, &content)?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))

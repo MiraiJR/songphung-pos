@@ -3,10 +3,6 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
-pub fn render_receipt_preview() -> String {
-    "SONG PHUNG KARAOKE\nCam on quy khach!".to_string()
-}
-
 pub fn print_receipt_to_network(printer_addr: &str, content: &str) -> Result<(), String> {
     let mut stream = TcpStream::connect(printer_addr).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();

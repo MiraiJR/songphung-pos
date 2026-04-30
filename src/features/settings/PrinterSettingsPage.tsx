@@ -8,6 +8,28 @@ type Props = {
 };
 
 type TestStatus = { type: "ok" | "error"; message: string } | null;
+const RECEIPT_PREVIEW_LINES = [
+  "     KARAOKE SONG PHỤNG 2      ",
+  "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
+  "        ĐT: 0974 089 367        ",
+  "",
+  "        PHIẾU THANH TOÁN        ",
+  "        Phòng P1 (P1)           ",
+  " Thời gian: 29/04/2026 05:46 PM -",
+  "            07:24 PM            ",
+  "Nhân viên: Admin  Số HĐ: 00001  ",
+  "---------------------------------",
+  "Mặt hàng        SL  Đ.GIÁ T.TIỀN",
+  "BIA QUY NHON    12  14,000 168,000",
+  "Nước suối        2  10,000  20,000",
+  "Khăn lạnh        6   3,000  18,000",
+  "---------------------------------",
+  "TỔNG CỘNG:            206,000",
+  "TIỀN GIỜ:             245,000",
+  "TIỀN MẶT (đ):         451,000",
+  "---------------------------------",
+  "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
+].join("\n");
 
 export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Props) {
   const [systemPrinters, setSystemPrinters] = useState<string[]>([]);
@@ -58,7 +80,7 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-slate-800">Cài đặt máy in</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Chọn máy in hệ thống hoặc nhập IP máy in mạng. Cấu hình được lưu local.
+          Ưu tiên chọn máy in hệ thống (USB/cục bộ). Chỉ nhập địa chỉ IP khi dùng máy in mạng.
         </p>
       </div>
 
@@ -79,7 +101,7 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
             }}
           >
             <option value="SYSTEM">Máy in hệ thống</option>
-            <option value="CUSTOM">Nhập IP máy in mạng</option>
+            <option value="CUSTOM">Nhập địa chỉ máy in mạng</option>
           </Select>
         </div>
 
@@ -97,7 +119,7 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
           </div>
         ) : (
           <div className="mb-3">
-            <label className="mb-1 block text-sm text-slate-600">IP máy in mạng (vd: 192.168.1.20:9100)</label>
+            <label className="mb-1 block text-sm text-slate-600">Địa chỉ máy in mạng (vd: 192.168.1.20:9100)</label>
             <input
               className="app-input w-full"
               value={inputValue}
@@ -118,13 +140,24 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
 
         {status && (
           <div
-            className={`mt-3 rounded px-3 py-2 text-sm ${
-              status.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-            }`}
+            className={`mt-3 rounded px-3 py-2 text-sm ${status.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+              }`}
           >
             {status.type === "ok" ? "🟢" : "🔴"} {status.message}
           </div>
         )}
+      </div>
+
+      <div className="app-card mx-auto mt-4 max-w-2xl p-4 text-center">
+        <h3 className="text-base font-semibold text-slate-800">Xem trước hóa đơn giấy K80x45 (80mm)</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          Mẫu minh họa để canh bố cục in nhiệt XPrinter (không phải dữ liệu hóa đơn thật).
+        </p>
+        <div className="mt-3 flex justify-center rounded-lg bg-slate-100 p-4">
+          <pre className="mx-auto block w-[80mm] overflow-x-auto bg-white p-3 text-center font-mono text-[11px] leading-4 text-slate-800 shadow">
+            {RECEIPT_PREVIEW_LINES}
+          </pre>
+        </div>
       </div>
     </section>
   );
