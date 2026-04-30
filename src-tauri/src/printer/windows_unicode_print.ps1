@@ -23,8 +23,8 @@ $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0,
 $paperSize = New-Object System.Drawing.Printing.PaperSize("K80", 315, 1200)
 $doc.DefaultPageSettings.PaperSize = $paperSize
 
-$fontNormal = New-Object System.Drawing.Font("Courier New", 7.0, [System.Drawing.FontStyle]::Bold)
-$fontLarge  = New-Object System.Drawing.Font("Courier New", 9.5, [System.Drawing.FontStyle]::Bold)
+$fontNormal = New-Object System.Drawing.Font("Courier New", 8.0, [System.Drawing.FontStyle]::Bold)
+$fontLarge  = New-Object System.Drawing.Font("Courier New", 10.5, [System.Drawing.FontStyle]::Bold)
 $brush = [System.Drawing.Brushes]::Black
 $sf = New-Object System.Drawing.StringFormat
 $sf.FormatFlags = [System.Drawing.StringFormatFlags]::NoWrap -bor [System.Drawing.StringFormatFlags]::NoClip
