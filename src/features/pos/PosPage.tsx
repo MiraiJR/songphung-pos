@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Loader2, Pencil, Search, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Search, Trash2, X } from "lucide-react";
 import { ROOM_STATUS_LABEL } from "@/types/karaoke";
 import type { CurrentSession, OrderItem, Product, ProductGroup, Room } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
@@ -305,7 +305,16 @@ export function PosPage(props: Props) {
 
       {transferModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[420px] max-w-[95vw] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[420px] max-w-[95vw] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              disabled={transferSubmitting}
+              onClick={() => setTransferModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-2 text-lg font-semibold text-slate-800">Chuyển phòng</h3>
             <p className="mb-3 text-sm text-slate-600">
               Chọn phòng trống để chuyển toàn bộ phiên và món đang gọi sang phòng đích.

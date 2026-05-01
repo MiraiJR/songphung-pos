@@ -20,7 +20,7 @@ song-phung-karaoke/
 │   │   ├── rooms/          # CRUD phòng
 │   │   ├── products/       # CRUD sản phẩm & nhóm
 │   │   ├── history/        # Xem lịch sử hóa đơn
-│   │   └── settings/       # Cài đặt máy in + xem trước hóa đơn & QR
+│   │   └── settings/       # Cài đặt (tab Máy in/QR Code), preview và CRUD QR
 │   ├── hooks/              # Custom hooks (gọi Tauri IPC commands)
 │   ├── store/              # Zustand stores (Global state cho POS)
 │   ├── types/              # TypeScript interfaces/types
@@ -28,10 +28,10 @@ song-phung-karaoke/
 ├── src-tauri/              # Backend (Rust)
 │   ├── src/
 │   │   ├── commands/       # Tauri IPC commands (expose cho Frontend gọi)
-│   │   ├── bill_qr.rs      # Ảnh QR thanh toán: mặc định + file trong App Data
+│   │   ├── bill_qr.rs      # Sinh VietQR động (tag 54 + CRC16-CCITT False), render PNG
 │   │   ├── database/       # Logic kết nối SQLite, migrations
 │   │   ├── models/         # Rust structs map với DB
-│   │   ├── printer/      # In ESC/POS, định dạng bill, raster QR (escpos_qr.rs), script Windows (.ps1)
+│   │   ├── printer/         # In ESC/POS, định dạng bill, marker @@BILL_QR@@, raster QR
 │   │   └── main.rs         # Entry point, setup Tauri
 │   ├── migrations/         # Chứa file SQL tạo bảng
 │   └── tauri.conf.json     # Cấu hình app (window size, permissions)
@@ -42,7 +42,11 @@ song-phung-karaoke/
 
 ## 2. THIẾT KẾ DATABASE (SQLite Schema)
 
-Tạo một file migration `001_init.sql` trong thư mục `migrations` của Rust:
+Migration hiện tại gồm:
+- `001_init.sql`: schema lõi (phòng, nhóm, sản phẩm, lịch sử, chi tiết món).
+- `002_qr_thanh_toan.sql`: schema quản lý nhiều QR thanh toán.
+
+### 2.1. `001_init.sql` (schema lõi)
 
 ```sql
 -- Bảng Phong
@@ -95,6 +99,28 @@ CREATE TABLE lich_su_phong_san_pham (
     FOREIGN KEY (lich_su_phong_id) REFERENCES lich_su_phong(lich_su_phong_id) ON DELETE CASCADE,
     FOREIGN KEY (san_pham_id) REFERENCES san_pham(san_pham_id),
     UNIQUE(lich_su_phong_id, san_pham_id) -- Tránh duplicate, update số lượng nếu trùng
+);
+```
+
+### 2.2. `002_qr_thanh_toan.sql` (quản lý QR thanh toán)
+
+```sql
+CREATE TABLE IF NOT EXISTS qr_thanh_toan (
+    qr_thanh_toan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    qr_thanh_toan_ten TEXT NOT NULL,
+    qr_code TEXT NOT NULL
+);
+
+INSERT INTO qr_thanh_toan (qr_thanh_toan_ten, qr_code)
+SELECT 'TRUONG MINH HUNG', '00020101021138570010A000000727012700069704220113VQRQAFSHT12560208QRIBFTTA53037045802VN62340107NPS68690819VQRLOAMB2512055872763045694'
+WHERE NOT EXISTS (
+    SELECT 1 FROM qr_thanh_toan WHERE qr_thanh_toan_ten = 'TRUONG MINH HUNG'
+);
+
+INSERT INTO qr_thanh_toan (qr_thanh_toan_ten, qr_code)
+SELECT 'LE THI MY NUONG', '00020101021138530010A0000007270123000697042201099740893670208QRIBFTTA53037045802VN6304414a'
+WHERE NOT EXISTS (
+    SELECT 1 FROM qr_thanh_toan WHERE qr_thanh_toan_ten = 'LE THI MY NUONG'
 );
 ```
 
@@ -154,11 +180,12 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 
 ### Feature 4: Thanh toán hóa đơn (Checkout)
 * **Trigger:** Click nút "Thanh Toán".
-* **Modal Checkout:** Hiện bảng tổng kết. Cho phép User gõ giá trị custom vào field "Thành tiền" (để làm tròn hoặc giảm giá). Có Checkbox `[x] In hóa đơn`.
+* **Modal Checkout:** Hiện bảng tổng kết. Cho phép User gõ custom trực tiếp `Tiền giờ` và `Thành tiền`. Có Checkbox `[x] In hóa đơn`.
+* **QR trong Checkout:** Có Checkbox `[x] In mã QR` + Select chọn QR thanh toán. Tuỳ chọn fixed amount không hiển thị trong checkout (chỉ dùng ở màn hình Cài đặt để test).
 * **Luồng xác nhận bắt buộc:** Click "Thanh toán" phải mở modal trước, chỉ khi User nhấn "Xác nhận thanh toán" mới thực hiện checkout.
 * **Calculation Rule:** * `Thời gian hát` = (Time hiện tại - gio_bat_dau) -> Quy ra phút.
     * `Tiền giờ` = Math.ceil((Phút * tien_gio) / 60) -> *Làm tròn lên theo yêu cầu*.
-* **Rust IPC Command:** `invoke('checkout_room', { payload: { history_id, room_id, final_amount, print_receipt, printer_name_or_ip } })`  
+* **Rust IPC Command:** `invoke('checkout_room', { payload: { history_id, room_id, hour_amount, final_amount, print_receipt, printer_name_or_ip, qr_settings } })`  
     (Frontend lưu máy in trong `localStorage`, truyền `printer_name_or_ip` khi cần in.)
 * **Logic (Backend):**
     1. Update `lich_su_phong` với các thông tin thanh toán, chuyển trạng thái thành `DA_THANH_TOAN`.
@@ -181,15 +208,18 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 * **Tauri Logic:** Chuỗi template trong `commands/mod.rs` (`compose_receipt_bill`, `compose_temporary_bill`), module `printer/mod.rs` ghép bytes ESC/POS và cắt giấy (`GS V`).
 
 ### Feature 5b: Mã QR trên mọi phiếu in (thanh toán, tạm tính, in lại)
-* **Nguồn ảnh:**
-    * **Mặc định:** ảnh PNG đóng gói sẵn (`src/assets/qr_code.png`, embed trong Rust qua `bill_qr.rs`).
-    * **Tuỳ chỉnh:** file `bill_qr_code.png` trong thư mục **App Data** của app (ghi khi user tải ảnh mới ở Cài đặt). Xóa file hoặc **Khôi phục QR gốc** → dùng lại ảnh mặc định.
-* **API Rust:** `qr_png_for_print(app)` luôn trả về bytes PNG (fallback bundle nếu đọc file lỗi). `print_receipt_to_target` nếu thấy marker trong nội dung mà không có bytes QR hợp lệ thì vẫn fallback sang ảnh mặc định — tránh phiếu không có QR.
+* **Nguồn QR:** lấy từ bảng `qr_thanh_toan` theo `selected_qr_thanh_toan_id` (fallback bản ghi đầu tiên, rồi fallback payload mặc định).
+* **Chuẩn dữ liệu:** QR lưu dưới dạng **chuỗi VietQR tĩnh** (`010211`) đã validate.
+* **Sinh QR động theo tổng tiền:**
+    1. Đổi `010211` -> `010212` (static -> dynamic).
+    2. Thêm Tag `54` chứa số tiền VND.
+    3. Bỏ CRC cũ, tính lại CRC16-CCITT False rồi gắn lại Tag `63`.
+* **Tuỳ chọn in QR:** nếu `print_qr_on_receipt = false`, backend strip marker `@@BILL_QR@@` để không in QR.
 * **Luồng in có QR (đồng nhất):**
-    * **Thanh toán + In hóa đơn:** `checkout_room` → `compose_receipt_bill` (có marker) → `print_receipt_to_target(..., Some(qr))`.
-    * **In phiếu tạm tính:** `print_temporary_bill` → `compose_temporary_bill` (có marker) → cùng `print_receipt_to_target`.
-    * **In lại từ lịch sử:** `reprint_history_bill` → `compose_receipt_bill` → cùng `print_receipt_to_target`.
-    * **In thử (Cài đặt):** `test_printer` → mẫu `compose_printer_test_sample_receipt` (có marker) + QR hiện tại.
+    * **Thanh toán + In hóa đơn:** `checkout_room` → `compose_receipt_bill` (có marker) → QR động theo tổng tiền thực tế.
+    * **In phiếu tạm tính:** `print_temporary_bill` → `compose_temporary_bill` (có marker) → QR động theo tổng tạm tính.
+    * **In lại từ lịch sử:** `reprint_history_bill` → `compose_receipt_bill` → QR động theo tổng tiền bill đã lưu.
+    * **In thử (Cài đặt):** `test_printer` + `get_bill_qr_preview_data_url` có thể test fixed amount.
 * **Kỹ thuật in ảnh:**
     * **Mạng / macOS / Linux (raw):** Chuyển PNG sang raster **ESC/POS `GS v 0`** (`escpos_qr.rs`): QR được scale **~40%** chiều ngang khổ K80 (~384 dot), đặt **giữa** bằng nền trắng hai bên trong một bitmap đủ rộng (không phụ thuộc `ESC a` cho bitmap).
     * **Windows (PrintDocument):** `windows_unicode_print.ps1` nhận `-QrImagePath`; khi gặp `@@BILL_QR@@`, vẽ PNG **~40%** chiều ngang khổ giấy và **căn giữa**.
@@ -216,7 +246,8 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 * **Tính năng:** Bảng danh sách các `lich_su_phong` đã có trạng thái `DA_THANH_TOAN`. Lọc theo ngày (Date Picker). Có dòng dưới cùng tính "Tổng doanh thu trong ngày".
 * **Tương tác dòng lịch sử (left click):** Left click vào 1 dòng `lich_su_phong` sẽ mở dropdown menu hành động gồm:
     1. `Xem chi tiết`
-    2. `In lại hóa đơn`
+    2. `Chỉnh sửa`
+    3. `In lại hóa đơn`
 * **Xem chi tiết hóa đơn:**
     * Mở modal chi tiết hóa đơn.
     * Hiển thị đầy đủ thông tin bill: mã hóa đơn, tên phòng, giờ vào, giờ ra, tiền món, tiền giờ, tổng thanh toán.
@@ -225,28 +256,31 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     * Frontend phải gọi IPC kiểm tra kết nối máy in trước: `invoke('check_printer_connection')`.
     * Nếu **không kết nối**: hiển thị lỗi trên UI và không thực hiện in.
     * Nếu **đã kết nối**: gọi IPC in lại bill: `invoke('reprint_history_bill', { historyId, printerAddr })` (địa chỉ máy in lấy từ `localStorage` như các luồng in khác).
-    * Backend render lại nội dung hóa đơn từ `lich_su_phong` + `lich_su_phong_san_pham` (**cùng template và marker QR** như lúc thanh toán), ghép ảnh QR hiện tại (`qr_png_for_print`), rồi in (raw ESC/POS hoặc Windows như Feature 5/5b).
+    * Backend render lại nội dung hóa đơn từ `lich_su_phong` + `lich_su_phong_san_pham` (**cùng template và marker QR** như lúc thanh toán), sinh QR động theo tổng tiền từ QR đã chọn, rồi in (raw ESC/POS hoặc Windows như Feature 5/5b).
 * **Chỉnh sửa hóa đơn đã thanh toán (trong menu Tùy chọn):**
     * Mở modal chỉnh sửa cho phép cập nhật: `tiền giờ`, `tổng tiền`, `số lượng món`.
     * Có checkbox **[In hóa đơn sau khi lưu chỉnh sửa]**:
         * Nếu tick: **lưu trước**, sau đó gọi luồng in lại hóa đơn (`reprint_history_bill`).
         * Nếu không tick: chỉ lưu chỉnh sửa.
     * Khi lưu: Backend cập nhật `lich_su_phong_san_pham.so_luong`, tính lại `tong_tien_san_pham` và lưu `tong_tien_gio` / `tong_tien_thanh_toan` theo dữ liệu chỉnh sửa.
+    * Modal chi tiết/chỉnh sửa có nút `X` góc phải để đóng nhanh.
 
 ### Feature 11: Kiểm tra & Cài đặt Máy in (Printer Setup & Test)
 * **UI:** View **`/admin/settings`** (menu **Cài đặt**). Component: `src/features/settings/PrinterSettingsPage.tsx`.
-* **Tính năng (Chỉ lưu Local State):**
+* **Tính năng (LocalStorage + DB QR):**
+    * Tách 2 tab rõ ràng: **Máy In** và **QR Code**.
     * Combobox/Dropdown hiển thị danh sách các máy in đang cài đặt trên máy tính (System Printers) hoặc input để nhập IP máy in mạng.
     * Nút **[In thử / Kiểm tra kết nối]** — in **mẫu hóa đơn đầy đủ** (giống preview) **và mã QR** (đúng như phiếu thật / Feature 5b).
     * Hiển thị trạng thái kết nối trực quan: 🟢 Đã kết nối hoặc 🔴 Lỗi.
-    * **Xem trước:** Khối text mẫu K80 (`get_sample_receipt_preview`) — trên UI dòng marker QR được thay bằng placeholder để dễ đọc; **ảnh QR hiện tại** hiển thị ngay bên dưới (data URL từ backend).
-    * **Ảnh QR:** Nút **Tải ảnh QR mới** (PNG/JPEG) → `save_bill_qr_png`; nút **Khôi phục QR gốc** → `reset_bill_qr_png` (xóa file trong App Data, dùng lại ảnh bundle).
+    * **Xem trước:** Khối text mẫu K80 (`get_sample_receipt_preview`) + preview QR hiện tại (data URL).
+    * **Quản lý QR Code:** CRUD bản ghi `qr_thanh_toan` (tên + chuỗi QR), render ảnh QR thay vì hiển thị raw code.
+    * **Tuỳ chọn QR:** bật/tắt in QR, chọn QR mặc định, fixed amount để test preview/in thử.
 * **Rust IPC Command:**
     * `invoke('get_system_printers')` → `string[]` tên máy in (PowerShell `Get-Printer` trên Windows, `lpstat` trên Unix).
     * `invoke('get_sample_receipt_preview')` → chuỗi text mẫu (có marker `@@BILL_QR@@` trong payload thật; UI có thể ẩn marker khi hiển thị).
-    * `invoke('get_bill_qr_preview_data_url')` → `data:image/png;base64,...` của QR đang dùng để in.
-    * `invoke('save_bill_qr_png', { bytes: number[] })` → validate ảnh, ghi vào App Data.
-    * `invoke('reset_bill_qr_png')` → xóa file tuỳ chỉnh, về ảnh mặc định.
+    * `invoke('get_bill_qr_preview_data_url', { qr_settings })` → data URL preview QR theo cấu hình test.
+    * `invoke('get_qr_thanh_toan_preview_data_url', { qrThanhToanId })` → data URL preview theo từng QR.
+    * `invoke('list_qr_thanh_toan')`, `invoke('create_qr_thanh_toan')`, `invoke('update_qr_thanh_toan')`, `invoke('delete_qr_thanh_toan')`.
     * `invoke('test_printer', { printerNameOrIp })` (Frontend; Tauri map sang tham số Rust `printer_name_or_ip`) → Kiểm tra kết nối và in mẫu **kèm QR** (ESC/POS hoặc Windows như Feature 5b). Trả về `Result` để Frontend toast (Sonner).
 * **Logic (Frontend / LocalStorage):**
     * Khi test thành công, lưu tên/IP máy in vào `localStorage` (key ví dụ `songphung_printer_target`).
@@ -258,9 +292,9 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 * **Trigger:** Click nút **[In phiếu]** trên Panel Left.
 * **Logic xử lý:**
     1. Frontend lấy toàn bộ thông tin hiện tại: Danh sách món, Giờ bắt đầu, Giờ hiện tại (để tính tiền giờ tạm tính).
-    2. Gọi IPC Command: `invoke('print_temporary_bill', { data, printer_name_or_ip })` (`data` gồm phòng, giờ bắt đầu, giờ hiện tại, dòng món, các tổng tiền).
+    2. Gọi IPC Command: `invoke('print_temporary_bill', { data, printer_name_or_ip, qr_settings })` (`data` gồm phòng, giờ bắt đầu, giờ hiện tại, dòng món, các tổng tiền).
     3. Backend Rust nhận data, format template **"PHIẾU TẠM TÍNH"** — **cùng footer có marker QR và dòng cảm ơn** như hóa đơn chính thức (Feature 5b).
-    4. Ghép ảnh QR (`qr_png_for_print`) và gửi tới máy in.
+    4. Sinh QR động từ QR đã chọn + tổng tạm tính, rồi gửi tới máy in.
 * **Ràng buộc:** Chỉ áp dụng cho phòng đang `DANG_HOAT_DONG`. Không thực hiện bất kỳ câu lệnh `UPDATE` nào vào Database.
 
 ### Feature 13: Import & Export CSV (với logic Upsert)
@@ -304,6 +338,11 @@ Tính năng này yêu cầu sự cẩn trọng cao để tránh xóa nhầm dữ
 #### 3. Quy trình xác nhận (UX)
 *   **Cảnh báo nguy hiểm:** Vì dữ liệu sau khi xóa local sẽ không thể khôi phục, hệ thống phải hiện **Confirmation Dialog** với cảnh báo đỏ.
 *   **Xác nhận bằng mã/chữ:** Đối với hành động xóa hàng loạt theo ngày, có thể yêu cầu user nhập chữ "XOA" để xác nhận chắc chắn.
+
+### Feature 15: Chuẩn hoá UX modal & checkbox
+* **Nút đóng nhanh:** Toàn bộ modal custom (`fixed inset-0 ...`) đều có nút `X` ở góc phải trên.
+* **Checkbox thống nhất:** Dùng Shadcn `Checkbox` cho toàn hệ thống, trạng thái checked màu xanh.
+* **Mục tiêu:** Đồng nhất thao tác đóng modal, tránh lệ thuộc duy nhất vào nút Hủy/Đóng ở footer.
 
 
 ---

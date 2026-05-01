@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
-import { Download, Plus, Search, Upload } from "lucide-react";
+import { Download, Plus, Search, Upload, X } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import {
   AlertDialog,
@@ -226,7 +226,15 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
 
       {createModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setCreateModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Thêm nhóm sản phẩm</h3>
             <div className="space-y-2">
               <input
@@ -270,7 +278,15 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
 
       {editModalOpen && editingId !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setEditModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Sửa nhóm sản phẩm</h3>
             <div className="space-y-2">
               <input

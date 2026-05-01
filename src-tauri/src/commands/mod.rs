@@ -79,6 +79,13 @@ pub struct PrinterConnectionStatus {
     pub message: String,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct QrThanhToan {
+    pub qr_thanh_toan_id: i64,
+    pub qr_thanh_toan_ten: String,
+    pub qr_code: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateRoomPayload {
     pub ten_phong: String,
@@ -131,6 +138,34 @@ pub struct CheckoutPayload {
     pub final_amount: f64,
     pub print_receipt: bool,
     pub printer_name_or_ip: Option<String>,
+    #[serde(default)]
+    pub qr_settings: BillQrPrintSettings,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BillQrPrintSettings {
+    #[serde(default = "bill_qr_print_default_true")]
+    pub print_qr_on_receipt: bool,
+    #[serde(default)]
+    pub qr_use_fixed_amount: bool,
+    #[serde(default)]
+    pub qr_fixed_amount_vnd: u64,
+    pub selected_qr_thanh_toan_id: Option<i64>,
+}
+
+fn bill_qr_print_default_true() -> bool {
+    true
+}
+
+impl Default for BillQrPrintSettings {
+    fn default() -> Self {
+        Self {
+            print_qr_on_receipt: true,
+            qr_use_fixed_amount: false,
+            qr_fixed_amount_vnd: 0,
+            selected_qr_thanh_toan_id: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +209,19 @@ pub struct UpdatePaidHistoryBillPayload {
     pub items: Vec<UpdateHistoryOrderItemQtyPayload>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateQrThanhToanPayload {
+    pub qr_thanh_toan_ten: String,
+    pub qr_code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateQrThanhToanPayload {
+    pub qr_thanh_toan_id: i64,
+    pub qr_thanh_toan_ten: String,
+    pub qr_code: String,
+}
+
 fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, String> {
     if let Some(target) = printer_name_or_ip {
         let trimmed = target.trim();
@@ -197,6 +245,54 @@ fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, 
             "Chưa cấu hình máy in và không tìm thấy máy in hệ thống. Vào Cài đặt để chọn máy in."
                 .to_string()
         })
+}
+
+fn validate_static_vietqr(code: &str) -> Result<String, String> {
+    let trimmed = code.trim();
+    if trimmed.is_empty() {
+        return Err("Chuỗi QR không được để trống.".to_string());
+    }
+    if !trimmed.starts_with("000201") {
+        return Err("QR không hợp lệ: phải bắt đầu bằng 000201.".to_string());
+    }
+    if !trimmed.contains("010211") {
+        return Err("QR không hợp lệ: chỉ chấp nhận QR tĩnh (010211).".to_string());
+    }
+    if !trimmed.contains("5802VN") {
+        return Err("QR không hợp lệ: thiếu mã quốc gia 5802VN.".to_string());
+    }
+    if trimmed.len() < 24 {
+        return Err("QR không hợp lệ: chuỗi quá ngắn.".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+async fn resolve_selected_qr_code(
+    pool: &sqlx::SqlitePool,
+    selected_qr_thanh_toan_id: Option<i64>,
+) -> Result<String, String> {
+    if let Some(id) = selected_qr_thanh_toan_id {
+        let row = sqlx::query_scalar::<_, String>(
+            "SELECT qr_code FROM qr_thanh_toan WHERE qr_thanh_toan_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        if let Some(code) = row {
+            return validate_static_vietqr(&code);
+        }
+    }
+
+    let fallback = sqlx::query_scalar::<_, String>(
+        "SELECT qr_code FROM qr_thanh_toan ORDER BY qr_thanh_toan_id ASC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let code = fallback.unwrap_or_else(|| crate::bill_qr::DEFAULT_VIETQR_PAYLOAD.to_string());
+    validate_static_vietqr(&code)
 }
 
 /// Convert "YYYY-MM-DD HH:MM:SS" → "DD/MM/YYYY hh:mm AM/PM"
@@ -422,8 +518,34 @@ pub fn get_sample_receipt_preview() -> String {
 }
 
 #[tauri::command]
-pub fn get_bill_qr_preview_data_url(app: tauri::AppHandle) -> Result<String, String> {
-    let bytes = crate::bill_qr::qr_png_for_preview(&app);
+pub async fn get_bill_qr_preview_data_url(
+    state: tauri::State<'_, DbState>,
+    qr_settings: Option<BillQrPrintSettings>,
+) -> Result<Option<String>, String> {
+    let settings = qr_settings.unwrap_or_default();
+    if !settings.print_qr_on_receipt {
+        return Ok(None);
+    }
+    let base_qr = resolve_selected_qr_code(state.pool(), settings.selected_qr_thanh_toan_id).await?;
+    let bytes = crate::bill_qr::qr_png_preview_from_base(
+        &base_qr,
+        settings.qr_use_fixed_amount,
+        settings.qr_fixed_amount_vnd,
+    )?;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    Ok(Some(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(&bytes)
+    )))
+}
+
+#[tauri::command]
+pub async fn get_qr_thanh_toan_preview_data_url(
+    state: tauri::State<'_, DbState>,
+    qr_thanh_toan_id: i64,
+) -> Result<String, String> {
+    let base_qr = resolve_selected_qr_code(state.pool(), Some(qr_thanh_toan_id)).await?;
+    let bytes = crate::bill_qr::qr_png_preview_from_base(&base_qr, false, 0)?;
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     Ok(format!(
         "data:image/png;base64,{}",
@@ -432,13 +554,88 @@ pub fn get_bill_qr_preview_data_url(app: tauri::AppHandle) -> Result<String, Str
 }
 
 #[tauri::command]
-pub fn save_bill_qr_png(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
-    crate::bill_qr::save_bill_qr_png(&app, &bytes)
+pub async fn list_qr_thanh_toan(state: tauri::State<'_, DbState>) -> Result<Vec<QrThanhToan>, String> {
+    sqlx::query_as::<_, QrThanhToan>(
+        "SELECT qr_thanh_toan_id, qr_thanh_toan_ten, qr_code
+         FROM qr_thanh_toan
+         ORDER BY qr_thanh_toan_id ASC",
+    )
+    .fetch_all(state.pool())
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn reset_bill_qr_png(app: tauri::AppHandle) -> Result<(), String> {
-    crate::bill_qr::reset_bill_qr_png(&app)
+pub async fn create_qr_thanh_toan(
+    state: tauri::State<'_, DbState>,
+    payload: CreateQrThanhToanPayload,
+) -> Result<i64, String> {
+    let ten = payload.qr_thanh_toan_ten.trim();
+    if ten.is_empty() {
+        return Err("Tên QR không được để trống.".to_string());
+    }
+    let qr_code = validate_static_vietqr(&payload.qr_code)?;
+
+    let result = sqlx::query(
+        "INSERT INTO qr_thanh_toan (qr_thanh_toan_ten, qr_code)
+         VALUES (?, ?)",
+    )
+    .bind(ten)
+    .bind(qr_code)
+    .execute(state.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(result.last_insert_rowid())
+}
+
+#[tauri::command]
+pub async fn update_qr_thanh_toan(
+    state: tauri::State<'_, DbState>,
+    payload: UpdateQrThanhToanPayload,
+) -> Result<(), String> {
+    let ten = payload.qr_thanh_toan_ten.trim();
+    if ten.is_empty() {
+        return Err("Tên QR không được để trống.".to_string());
+    }
+    let qr_code = validate_static_vietqr(&payload.qr_code)?;
+    let result = sqlx::query(
+        "UPDATE qr_thanh_toan
+         SET qr_thanh_toan_ten = ?, qr_code = ?
+         WHERE qr_thanh_toan_id = ?",
+    )
+    .bind(ten)
+    .bind(qr_code)
+    .bind(payload.qr_thanh_toan_id)
+    .execute(state.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+    if result.rows_affected() == 0 {
+        return Err("Không tìm thấy QR để cập nhật.".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_qr_thanh_toan(
+    state: tauri::State<'_, DbState>,
+    qr_thanh_toan_id: i64,
+) -> Result<(), String> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM qr_thanh_toan")
+        .fetch_one(state.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+    if count <= 1 {
+        return Err("Phải giữ lại ít nhất 1 QR thanh toán.".to_string());
+    }
+    let result = sqlx::query("DELETE FROM qr_thanh_toan WHERE qr_thanh_toan_id = ?")
+        .bind(qr_thanh_toan_id)
+        .execute(state.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+    if result.rows_affected() == 0 {
+        return Err("Không tìm thấy QR để xóa.".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1020,7 +1217,7 @@ pub async fn checkout_room(
 
     if payload.print_receipt {
         let target = resolve_printer_target(payload.printer_name_or_ip.clone())?;
-        let content = compose_receipt_bill(
+        let mut content = compose_receipt_bill(
             payload.history_id,
             &checkout_bill
                 .try_get::<String, _>("ten_phong")
@@ -1037,8 +1234,27 @@ pub async fn checkout_room(
             tong_tien_gio,
             payload.final_amount,
         );
-        let qr = crate::bill_qr::qr_png_for_bill(&app, payload.final_amount);
-        let _ = crate::printer::print_receipt_to_target(&target, &content, Some(&qr));
+        let qr_cfg = payload.qr_settings;
+        if !qr_cfg.print_qr_on_receipt {
+            content = crate::printer::strip_bill_qr_marker(&content);
+        }
+        let qr = if qr_cfg.print_qr_on_receipt {
+            let base_qr =
+                resolve_selected_qr_code(pool, qr_cfg.selected_qr_thanh_toan_id).await?;
+            let amount = if qr_cfg.qr_use_fixed_amount {
+                qr_cfg.qr_fixed_amount_vnd as f64
+            } else {
+                payload.final_amount
+            };
+            crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
+        } else {
+            None
+        };
+        let _ = crate::printer::print_receipt_to_target(
+            &target,
+            &content,
+            qr.as_ref().map(|b| b.as_slice()),
+        );
     }
     Ok(())
 }
@@ -1281,40 +1497,72 @@ pub async fn get_system_printers() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub async fn test_printer(
-    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
     printer_name_or_ip: String,
+    qr_settings: Option<BillQrPrintSettings>,
 ) -> Result<String, String> {
     let target = printer_name_or_ip.trim();
     if target.is_empty() {
         return Err("Vui lòng chọn hoặc nhập máy in trước khi kiểm tra.".to_string());
     }
     crate::printer::check_printer_target_connection(target)?;
-    let content = compose_printer_test_sample_receipt();
-    let qr = crate::bill_qr::qr_png_for_bill(&app, 451_000.0);
-    crate::printer::print_receipt_to_target(target, &content, Some(&qr))?;
+    let cfg = qr_settings.unwrap_or_default();
+    let mut content = compose_printer_test_sample_receipt();
+    if !cfg.print_qr_on_receipt {
+        content = crate::printer::strip_bill_qr_marker(&content);
+    }
+    let qr = if cfg.print_qr_on_receipt {
+        let base_qr =
+            resolve_selected_qr_code(state.pool(), cfg.selected_qr_thanh_toan_id).await?;
+        let amount = if cfg.qr_use_fixed_amount {
+            cfg.qr_fixed_amount_vnd as f64
+        } else {
+            451_000.0
+        };
+        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
+    } else {
+        None
+    };
+    crate::printer::print_receipt_to_target(target, &content, qr.as_ref().map(|b| b.as_slice()))?;
     Ok(format!("Đã kiểm tra thành công máy in: {target}"))
 }
 
 #[tauri::command]
 pub async fn print_temporary_bill(
-    app: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
     data: TemporaryBillData,
     printer_name_or_ip: Option<String>,
+    qr_settings: Option<BillQrPrintSettings>,
 ) -> Result<String, String> {
     let target = resolve_printer_target(printer_name_or_ip)?;
     crate::printer::check_printer_target_connection(&target)?;
-    let content = compose_temporary_bill(&data);
-    let qr = crate::bill_qr::qr_png_for_bill(&app, data.tong_tam_tinh);
-    crate::printer::print_receipt_to_target(&target, &content, Some(&qr))?;
+    let cfg = qr_settings.unwrap_or_default();
+    let mut content = compose_temporary_bill(&data);
+    if !cfg.print_qr_on_receipt {
+        content = crate::printer::strip_bill_qr_marker(&content);
+    }
+    let qr = if cfg.print_qr_on_receipt {
+        let base_qr =
+            resolve_selected_qr_code(state.pool(), cfg.selected_qr_thanh_toan_id).await?;
+        let amount = if cfg.qr_use_fixed_amount {
+            cfg.qr_fixed_amount_vnd as f64
+        } else {
+            data.tong_tam_tinh
+        };
+        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
+    } else {
+        None
+    };
+    crate::printer::print_receipt_to_target(&target, &content, qr.as_ref().map(|b| b.as_slice()))?;
     Ok("Đã in phiếu tạm tính.".to_string())
 }
 
 #[tauri::command]
 pub async fn reprint_history_bill(
-    app: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     history_id: i64,
     printer_addr: Option<String>,
+    qr_settings: Option<BillQrPrintSettings>,
 ) -> Result<String, String> {
     let pool = state.pool();
     let address = resolve_printer_target(printer_addr)?;
@@ -1352,7 +1600,8 @@ pub async fn reprint_history_bill(
     let tong_thanh_toan = bill
         .try_get::<f64, _>("tong_tien_thanh_toan")
         .map_err(|e| e.to_string())?;
-    let content = compose_receipt_bill(
+    let cfg = qr_settings.unwrap_or_default();
+    let mut content = compose_receipt_bill(
         history_id,
         &bill.try_get::<String, _>("ten_phong")
             .map_err(|e| e.to_string())?,
@@ -1369,9 +1618,22 @@ pub async fn reprint_history_bill(
             .map_err(|e| e.to_string())?,
         tong_thanh_toan,
     );
-
-    let qr = crate::bill_qr::qr_png_for_bill(&app, tong_thanh_toan);
-    crate::printer::print_receipt_to_target(&address, &content, Some(&qr))?;
+    if !cfg.print_qr_on_receipt {
+        content = crate::printer::strip_bill_qr_marker(&content);
+    }
+    let qr = if cfg.print_qr_on_receipt {
+        let base_qr =
+            resolve_selected_qr_code(pool, cfg.selected_qr_thanh_toan_id).await?;
+        let amount = if cfg.qr_use_fixed_amount {
+            cfg.qr_fixed_amount_vnd as f64
+        } else {
+            tong_thanh_toan
+        };
+        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
+    } else {
+        None
+    };
+    crate::printer::print_receipt_to_target(&address, &content, qr.as_ref().map(|b| b.as_slice()))?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))
 }
 

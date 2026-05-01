@@ -11,6 +11,15 @@ use unicode_normalization::UnicodeNormalization;
 /// Single line in composed receipt text; replaced by QR bitmap when printing.
 pub const BILL_QR_MARKER_LINE: &str = "@@BILL_QR@@";
 
+/// Remove QR marker line from bill content when QR printing is disabled.
+pub fn strip_bill_qr_marker(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| line.trim() != BILL_QR_MARKER_LINE)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Printable width for K80 @ ~203dpi (dots per line). QR uses a fraction of this, centered on the raster.
 const RECEIPT_PAPER_WIDTH_DOTS: u32 = 384;
 /// QR module width as % of paper width (centered on full-width raster).

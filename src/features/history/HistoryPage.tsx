@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Trash2 } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -514,7 +514,15 @@ export function HistoryPage({
       {/* Detail modal */}
       {detailOpen && selectedHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-[1px]">
-          <div className="w-[760px] max-w-[96vw] rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+          <div className="relative w-[760px] max-w-[96vw] rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setDetailOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-4 text-lg font-semibold">Chi tiết hóa đơn #{selectedHistory.lich_su_phong_id}</h3>
             <div className="mx-auto w-full max-w-[82mm] rounded-md border border-slate-200 bg-white p-3 text-[12px] font-mono shadow-sm">
               <div className="text-center text-sm font-bold">PHIẾU THANH TOÁN</div>
@@ -573,7 +581,16 @@ export function HistoryPage({
       {/* Edit paid bill modal */}
       {editOpen && editingHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-[1px]">
-          <div className="flex max-h-[92vh] w-[1180px] max-w-[97vw] flex-col rounded-xl border border-slate-200 bg-white shadow-2xl">
+          <div className="relative flex max-h-[92vh] w-[1180px] max-w-[97vw] flex-col rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 z-10 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              disabled={savingEdit}
+              onClick={() => setEditOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <div className="border-b border-slate-200 px-5 py-4">
               <h3 className="text-lg font-semibold">Chỉnh sửa hóa đơn #{editingHistory.lich_su_phong_id}</h3>
               <p className="mt-1 text-sm text-slate-500">Cập nhật tiền giờ, tổng tiền và số lượng sản phẩm.</p>

@@ -131,6 +131,20 @@ pub fn amount_vnd_from_total(total: f64) -> u64 {
     }
 }
 
+/// Generate QR PNG bytes from a specific static VietQR base string.
+pub fn qr_png_for_bill_from_base(base_qr: &str, tong_tien: f64) -> Result<Vec<u8>, String> {
+    let amount_vnd = amount_vnd_from_total(tong_tien);
+    let payload = generate_dynamic_vietqr_payload(base_qr, amount_vnd)?;
+    encode_vietqr_string_to_png(&payload)
+}
+
+/// Generate QR preview bytes from a specific static VietQR base string.
+pub fn qr_png_preview_from_base(base_qr: &str, use_fixed_amount: bool, fixed_amount_vnd: u64) -> Result<Vec<u8>, String> {
+    let amount_vnd = if use_fixed_amount { fixed_amount_vnd } else { 451_000 };
+    let payload = generate_dynamic_vietqr_payload(base_qr, amount_vnd)?;
+    encode_vietqr_string_to_png(&payload)
+}
+
 /// PNG bytes for a bill: dynamic VietQR from **tổng tiền** when payload is valid; else bundled/custom PNG.
 pub fn qr_png_for_bill(app: &AppHandle, tong_tien: f64) -> Vec<u8> {
     qr_png_for_bill_amount(app, amount_vnd_from_total(tong_tien))

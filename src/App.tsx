@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { X } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { CategoriesAdminPage } from "./features/categories/CategoriesAdminPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
@@ -9,6 +10,8 @@ import { ProductsAdminPage } from "@/features/products/ProductsAdminPage";
 import { RoomsAdminPage } from "@/features/rooms/RoomsAdminPage";
 import { PrinterSettingsPage } from "@/features/settings/PrinterSettingsPage";
 import { Toaster } from "@/components/ui/sonner";
+import { Select } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useKaraoke } from "@/hooks/useKaraoke";
 import type { OrderItem, Product } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
@@ -19,6 +22,35 @@ type PrinterConnectionStatus = {
   message: string;
 };
 const PRINTER_STORAGE_KEY = "songphung_printer_target";
+const LS_QR_PRINT = "songphung_qr_print";
+const LS_QR_FIXED = "songphung_qr_fixed";
+const LS_QR_FIXED_AMOUNT = "songphung_qr_fixed_amount";
+const LS_QR_SELECTED_ID = "songphung_qr_selected_id";
+
+type BillQrSettings = {
+  print_qr_on_receipt: boolean;
+  qr_use_fixed_amount: boolean;
+  qr_fixed_amount_vnd: number;
+  selected_qr_thanh_toan_id: number | null;
+};
+
+type QrThanhToan = {
+  qr_thanh_toan_id: number;
+  qr_thanh_toan_ten: string;
+  qr_code: string;
+};
+
+function buildQrSettingsForRealBill(input: {
+  printQrOnReceipt: boolean;
+  selectedQrThanhToanId: number | null;
+}): BillQrSettings {
+  return {
+    print_qr_on_receipt: input.printQrOnReceipt,
+    qr_use_fixed_amount: false,
+    qr_fixed_amount_vnd: 0,
+    selected_qr_thanh_toan_id: input.selectedQrThanhToanId,
+  };
+}
 
 function todayLocalYmd(): string {
   const d = new Date();
@@ -67,6 +99,11 @@ function AppShell() {
   const [qtyInput, setQtyInput] = useState("1");
   const [printerTarget, setPrinterTarget] = useState("");
   const [printTemporaryBillLoading, setPrintTemporaryBillLoading] = useState(false);
+  const [printBillQr, setPrintBillQr] = useState(true);
+  const [qrUseFixedAmount, setQrUseFixedAmount] = useState(false);
+  const [qrFixedAmountDisplay, setQrFixedAmountDisplay] = useState("");
+  const [selectedQrThanhToanId, setSelectedQrThanhToanId] = useState<number | null>(null);
+  const [qrThanhToanList, setQrThanhToanList] = useState<QrThanhToan[]>([]);
   const karaoke = useKaraoke();
 
   useEffect(() => {
@@ -74,17 +111,42 @@ function AppShell() {
       const saved = (localStorage.getItem(PRINTER_STORAGE_KEY) ?? "").trim();
       if (saved) {
         setPrinterTarget(saved);
-        return;
+      } else {
+        try {
+          const printers = await invoke<string[]>("get_system_printers");
+          const firstPrinter = printers.find((name) => name.trim().length > 0) ?? "";
+          if (firstPrinter) {
+            setPrinterTarget(firstPrinter);
+            localStorage.setItem(PRINTER_STORAGE_KEY, firstPrinter);
+          }
+        } catch {
+          setPrinterTarget("");
+        }
       }
+      setPrintBillQr(localStorage.getItem(LS_QR_PRINT) !== "0");
+      setQrUseFixedAmount(localStorage.getItem(LS_QR_FIXED) === "1");
+      const fixedAmountRaw = localStorage.getItem(LS_QR_FIXED_AMOUNT) ?? "";
+      const fixedDigits = fixedAmountRaw.replace(/\D/g, "");
+      setQrFixedAmountDisplay(fixedDigits ? formatAmountDigits(fixedDigits) : "");
+      const selectedRaw = Number(localStorage.getItem(LS_QR_SELECTED_ID) ?? "");
+      setSelectedQrThanhToanId(Number.isFinite(selectedRaw) && selectedRaw > 0 ? selectedRaw : null);
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
       try {
-        const printers = await invoke<string[]>("get_system_printers");
-        const firstPrinter = printers.find((name) => name.trim().length > 0) ?? "";
-        if (firstPrinter) {
-          setPrinterTarget(firstPrinter);
-          localStorage.setItem(PRINTER_STORAGE_KEY, firstPrinter);
+        const list = await invoke<QrThanhToan[]>("list_qr_thanh_toan");
+        setQrThanhToanList(list);
+        if (list.length === 0) {
+          persistSelectedQrId(null);
+          return;
+        }
+        if (selectedQrThanhToanId == null || !list.some((x) => x.qr_thanh_toan_id === selectedQrThanhToanId)) {
+          persistSelectedQrId(list[0].qr_thanh_toan_id);
         }
       } catch {
-        setPrinterTarget("");
+        // ignore; settings page will show detailed errors
       }
     })();
   }, []);
@@ -97,6 +159,35 @@ function AppShell() {
   function updatePrinterTarget(value: string) {
     setPrinterTarget(value);
     localStorage.setItem(PRINTER_STORAGE_KEY, value);
+  }
+
+  function persistQrPrint(value: boolean) {
+    setPrintBillQr(value);
+    localStorage.setItem(LS_QR_PRINT, value ? "1" : "0");
+    if (!value) {
+      setQrUseFixedAmount(false);
+      localStorage.setItem(LS_QR_FIXED, "0");
+    }
+  }
+
+  function persistQrUseFixed(value: boolean) {
+    setQrUseFixedAmount(value);
+    localStorage.setItem(LS_QR_FIXED, value ? "1" : "0");
+  }
+
+  function persistQrFixedAmountDisplay(value: string) {
+    const digits = value.replace(/\D/g, "");
+    setQrFixedAmountDisplay(digits ? formatAmountDigits(digits) : "");
+    localStorage.setItem(LS_QR_FIXED_AMOUNT, digits);
+  }
+
+  function persistSelectedQrId(value: number | null) {
+    setSelectedQrThanhToanId(value);
+    if (value == null) {
+      localStorage.removeItem(LS_QR_SELECTED_ID);
+    } else {
+      localStorage.setItem(LS_QR_SELECTED_ID, String(value));
+    }
   }
 
   async function handleStartRoom(roomId: number) {
@@ -146,6 +237,10 @@ function AppShell() {
           tong_tam_tinh: s.tong_tien_thanh_toan,
         },
         printer_name_or_ip: printerTarget.trim() ? printerTarget.trim() : null,
+        qr_settings: buildQrSettingsForRealBill({
+          printQrOnReceipt: printBillQr,
+          selectedQrThanhToanId,
+        }),
       });
     } catch (error) {
       alertInvokeError(error, "Không in được phiếu tạm tính:");
@@ -322,6 +417,10 @@ function AppShell() {
         final_amount: finalAmount,
         print_receipt: checkoutPrintReceipt,
         printer_name_or_ip: printerTarget || null,
+        qr_settings: buildQrSettingsForRealBill({
+          printQrOnReceipt: printBillQr,
+          selectedQrThanhToanId,
+        }),
       },
     });
     setCheckoutModalOpen(false);
@@ -358,7 +457,18 @@ function AppShell() {
               />
               {orderModalOpen && selectedProduct && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="w-[340px] rounded-lg bg-white p-4 shadow-lg">
+                  <div className="relative w-[340px] rounded-lg bg-white p-4 shadow-lg">
+                    <button
+                      type="button"
+                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={() => {
+                        setOrderModalOpen(false);
+                        setSelectedProduct(null);
+                      }}
+                      aria-label="Đóng"
+                    >
+                      <X size={18} />
+                    </button>
                     <div className="mb-2 text-sm text-slate-500">Nhập số lượng</div>
                     <div className="mb-2 text-lg font-semibold">{selectedProduct.ten_san_pham}</div>
                     <input
@@ -404,7 +514,15 @@ function AppShell() {
               )}
               {cancelModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+                  <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+                    <button
+                      type="button"
+                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={() => setCancelModalOpen(false)}
+                      aria-label="Đóng"
+                    >
+                      <X size={18} />
+                    </button>
                     <h3 className="mb-2 text-lg font-semibold">Xác nhận trả phòng</h3>
                     <p className="text-sm text-slate-600">
                       Bạn có chắc chắn muốn hủy phòng này? Dữ liệu gọi món sẽ bị xóa.
@@ -428,7 +546,15 @@ function AppShell() {
               )}
               {checkoutModalOpen && karaoke.currentSession && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="w-[460px] rounded-lg bg-white p-4 shadow-lg">
+                  <div className="relative w-[460px] rounded-lg bg-white p-4 shadow-lg">
+                    <button
+                      type="button"
+                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={() => setCheckoutModalOpen(false)}
+                      aria-label="Đóng"
+                    >
+                      <X size={18} />
+                    </button>
                     <h3 className="mb-2 text-lg font-semibold">Xác nhận thanh toán</h3>
                     <div className="space-y-1 text-sm">
                       <div>
@@ -468,13 +594,12 @@ function AppShell() {
                       />
                     </div>
                     <label className="mt-3 inline-flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={checkoutPrintReceipt}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setCheckoutPrintReceipt(checked);
-                          if (checked) {
+                        onCheckedChange={(checked) => {
+                          const next = checked === true;
+                          setCheckoutPrintReceipt(next);
+                          if (next) {
                             void checkPrinterConnection();
                           } else {
                             setPrinterConnected(null);
@@ -484,6 +609,35 @@ function AppShell() {
                       />
                       In hóa đơn
                     </label>
+                    {checkoutPrintReceipt && (
+                      <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
+                        <label className="mb-2 flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={printBillQr}
+                            onCheckedChange={(checked) => persistQrPrint(checked === true)}
+                          />
+                          In mã QR
+                        </label>
+                        <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
+                          <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
+                          <Select
+                            value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
+                            onChange={(e) => {
+                              const id = Number(e.target.value);
+                              persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                            }}
+                          >
+                            <option value="">-- Chọn QR --</option>
+                            {qrThanhToanList.map((item) => (
+                              <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
+                                {item.qr_thanh_toan_ten}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                      </div>
+                    )}
                     {checkoutPrintReceipt && (
                       <div
                         className={`mt-2 rounded px-2 py-1 text-sm ${printerConnected ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
@@ -609,7 +763,14 @@ function AppShell() {
                 if (!printer.connected) {
                   throw new Error(printer.message);
                 }
-                return invoke<string>("reprint_history_bill", { historyId, printerAddr: printerTarget || null });
+                return invoke<string>("reprint_history_bill", {
+                  historyId,
+                  printerAddr: printerTarget || null,
+                  qr_settings: buildQrSettingsForRealBill({
+                    printQrOnReceipt: printBillQr,
+                    selectedQrThanhToanId,
+                  }),
+                });
               }}
               onDeleteByIds={async (ids) => {
                 return invoke<number>("delete_history_by_ids", { ids });
@@ -640,6 +801,14 @@ function AppShell() {
             <PrinterSettingsPage
               printerTarget={printerTarget}
               onChangePrinterTarget={updatePrinterTarget}
+              printBillQr={printBillQr}
+              onPrintBillQrChange={persistQrPrint}
+              qrUseFixedAmount={qrUseFixedAmount}
+              onQrUseFixedAmountChange={persistQrUseFixed}
+              qrFixedAmountDisplay={qrFixedAmountDisplay}
+              onQrFixedAmountDisplayChange={persistQrFixedAmountDisplay}
+              selectedQrThanhToanId={selectedQrThanhToanId}
+              onSelectedQrThanhToanIdChange={persistSelectedQrId}
             />
           }
         />
