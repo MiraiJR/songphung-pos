@@ -127,6 +127,7 @@ pub struct UpdateProductPayload {
 pub struct CheckoutPayload {
     pub history_id: i64,
     pub room_id: i64,
+    pub hour_amount: Option<f64>,
     pub final_amount: f64,
     pub print_receipt: bool,
     pub printer_name_or_ip: Option<String>,
@@ -955,7 +956,11 @@ pub async fn checkout_room(
     .map_err(|e| e.to_string())?;
     let total_minutes: i64 = row.try_get("total_minutes").map_err(|e| e.to_string())?;
     let tien_gio: f64 = row.try_get("tien_gio").map_err(|e| e.to_string())?;
-    let tong_tien_gio = ((total_minutes as f64 * tien_gio) / 60.0).ceil();
+    let tong_tien_gio_auto = ((total_minutes as f64 * tien_gio) / 60.0).ceil();
+    let tong_tien_gio = payload.hour_amount.unwrap_or(tong_tien_gio_auto);
+    if tong_tien_gio < 0.0 {
+        return Err("Tiền giờ không hợp lệ.".to_string());
+    }
 
     let tong_tien_san_pham: f64 = sqlx::query_scalar(
         "SELECT COALESCE(SUM(so_luong * don_gia), 0) FROM lich_su_phong_san_pham WHERE lich_su_phong_id = ?",

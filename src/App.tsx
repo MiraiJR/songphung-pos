@@ -58,6 +58,7 @@ function AppShell() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
   const [checkoutAmount, setCheckoutAmount] = useState("0");
+  const [checkoutHourAmount, setCheckoutHourAmount] = useState("0");
   const [checkoutPrintReceipt, setCheckoutPrintReceipt] = useState(true);
   const [printerChecking, setPrinterChecking] = useState(false);
   const [printerConnected, setPrinterConnected] = useState<boolean | null>(null);
@@ -256,7 +257,9 @@ function AppShell() {
       window.alert("Vui lòng chọn phòng đang phục vụ trước khi thanh toán.");
       return;
     }
+    const defaultHourAmount = Math.max(0, Math.ceil(karaoke.currentSession.tong_tien_gio));
     const defaultAmount = Math.ceil(karaoke.currentSession.tong_tien_thanh_toan);
+    setCheckoutHourAmount(formatAmountDigits(String(defaultHourAmount)));
     setCheckoutAmount(formatAmountDigits(String(defaultAmount)));
     setCheckoutPrintReceipt(true);
     setPrinterConnected(null);
@@ -290,6 +293,11 @@ function AppShell() {
 
   async function confirmCheckout() {
     if (!karaoke.currentSession || !karaoke.selectedRoomId) return;
+    const hourAmount = parseAmountInput(checkoutHourAmount);
+    if (Number.isNaN(hourAmount) || hourAmount < 0) {
+      window.alert("Tiền giờ không hợp lệ.");
+      return;
+    }
     const finalAmount = parseAmountInput(checkoutAmount);
     if (Number.isNaN(finalAmount) || finalAmount < 0) {
       window.alert("Thành tiền không hợp lệ.");
@@ -310,6 +318,7 @@ function AppShell() {
       payload: {
         history_id: karaoke.currentSession.lich_su_phong_id,
         room_id: karaoke.selectedRoomId,
+        hour_amount: hourAmount,
         final_amount: finalAmount,
         print_receipt: checkoutPrintReceipt,
         printer_name_or_ip: printerTarget || null,
@@ -429,10 +438,22 @@ function AppShell() {
                         <span className="text-slate-500">Tiền món:</span>{" "}
                         {Math.ceil(karaoke.currentSession.tong_tien_san_pham).toLocaleString()}
                       </div>
-                      <div>
-                        <span className="text-slate-500">Tiền giờ:</span>{" "}
-                        {Math.ceil(karaoke.currentSession.tong_tien_gio).toLocaleString()}
-                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <label className="mb-1 block text-sm text-slate-600">Tiền giờ</label>
+                      <input
+                        className="w-full rounded border px-3 py-2 text-right text-xl"
+                        value={checkoutHourAmount}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, "");
+                          const nextHour = digits === "" ? "" : formatAmountDigits(digits);
+                          setCheckoutHourAmount(nextHour);
+                          const hour = digits === "" ? 0 : Number(digits);
+                          const tienMon = Math.max(0, Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0));
+                          setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
+                        }}
+                        inputMode="numeric"
+                      />
                     </div>
                     <div className="mt-3">
                       <label className="mb-1 block text-sm text-slate-600">Thành tiền</label>
