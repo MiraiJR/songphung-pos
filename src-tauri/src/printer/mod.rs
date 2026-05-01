@@ -29,6 +29,7 @@ fn powershell_command() -> Command {
 }
 
 const ESC_POS_CODE_PAGE_WPC1258: u8 = 52;
+const LARGE_MARKER: &str = "@@LARGE@@";
 
 // ---------------------------------------------------------------------------
 // Windows-1258 Vietnamese encoder
@@ -254,6 +255,30 @@ fn encode_vietnamese_cp1258(content: &str) -> Vec<u8> {
     out
 }
 
+fn append_text_with_size_markers(buf: &mut Vec<u8>, content: &str) {
+    for chunk in content.split_inclusive('\n') {
+        let (line, has_newline) = if let Some(line) = chunk.strip_suffix('\n') {
+            (line, true)
+        } else {
+            (chunk, false)
+        };
+
+        if let Some(text) = line.strip_prefix(LARGE_MARKER) {
+            buf.extend_from_slice(&[0x1D, 0x21, 0x11]); // GS ! double width + double height
+            buf.extend_from_slice(&encode_vietnamese_cp1258(text));
+            if has_newline {
+                buf.push(0x0A);
+            }
+            buf.extend_from_slice(&[0x1D, 0x21, 0x00]); // GS ! back to normal
+        } else {
+            buf.extend_from_slice(&encode_vietnamese_cp1258(line));
+            if has_newline {
+                buf.push(0x0A);
+            }
+        }
+    }
+}
+
 fn receipt_print_bytes(content: &str, qr_png: Option<&[u8]>) -> Result<Vec<u8>, String> {
     let mut buf = Vec::with_capacity(content.len() + 4096);
 
@@ -265,10 +290,10 @@ fn receipt_print_bytes(content: &str, qr_png: Option<&[u8]>) -> Result<Vec<u8>, 
     let segments: Vec<&str> = content.split(BILL_QR_MARKER_LINE).collect();
     match segments.len() {
         1 => {
-            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[0]));
+            append_text_with_size_markers(&mut buf, segments[0]);
         }
         2 => {
-            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[0]));
+            append_text_with_size_markers(&mut buf, segments[0]);
             if let Some(png) = qr_png {
                 // QR is centered inside a full-width raster (see escpos_qr); avoid ESC a (printer-dependent for bitmaps).
                 buf.extend_from_slice(&escpos_qr::png_to_esc_pos_gs_v0(
@@ -278,7 +303,7 @@ fn receipt_print_bytes(content: &str, qr_png: Option<&[u8]>) -> Result<Vec<u8>, 
                 )?);
                 buf.push(0x0A);
             }
-            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[1]));
+            append_text_with_size_markers(&mut buf, segments[1]);
         }
         _ => {
             return Err("Nội dung hóa đơn có nhiều hơn một vị trí mã QR.".to_string());

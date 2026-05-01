@@ -269,13 +269,13 @@ fn compose_receipt_bill(
     use crate::printer::receipt_format as rf;
 
     let mut content = String::new();
-    content.push_str(&rf::lines_wrapped_centered("KARAOKE SONG PHỤNG 2"));
+    content.push_str(&rf::lines_wrapped_centered_large("KARAOKE SONG PHỤNG 2"));
     content.push_str(&rf::lines_wrapped_centered(
         "373 LÊ QUÝ ĐÔN, AN NHƠN, BÌNH ĐỊNH",
     ));
-    content.push_str(&rf::lines_wrapped_centered("ĐT: 0974 089 367"));
+    content.push_str(&rf::lines_wrapped_centered_large("ĐT: 0974 089 367"));
     content.push('\n');
-    content.push_str(&rf::lines_wrapped_centered("PHIẾU THANH TOÁN"));
+    content.push_str(&rf::lines_wrapped_centered_large("PHIẾU THANH TOÁN"));
     content.push_str(&rf::lines_wrapped_centered(&format!(
         "Phòng {room_name} ({room_name})"
     )));

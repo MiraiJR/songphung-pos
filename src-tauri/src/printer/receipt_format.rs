@@ -33,6 +33,18 @@ pub fn lines_wrapped_centered(text: &str) -> String {
     lines.join("\n") + "\n"
 }
 
+/// Centered text lines in large font (via @@LARGE@@ marker).
+pub fn lines_wrapped_centered_large(text: &str) -> String {
+    let lines: Vec<String> = wrap_words(text, LARGE_WIDTH)
+        .into_iter()
+        .map(|l| format!("{}{}", LARGE_MARKER, center_one(&l, LARGE_WIDTH)))
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    lines.join("\n") + "\n"
+}
+
 fn wrap_words(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![];
@@ -102,23 +114,24 @@ pub fn line_total(label: &str, value: &str) -> String {
 const COL_SL: usize = 3;
 const COL_DGIA: usize = 7;
 const COL_TTIEN: usize = 7;
-const COL_SEP: usize = 4;
-const SUFFIX_W: usize = COL_SEP + COL_SL + COL_DGIA + COL_TTIEN + 3;
+const COL_GAPS: usize = 3;
+const SUFFIX_W: usize = COL_SL + COL_DGIA + COL_TTIEN + COL_GAPS;
 const NAME_W: usize = RECEIPT_WIDTH - SUFFIX_W;
 
 pub fn line_item_header() -> String {
-    format!(
-        "{:<name_w$}{:<sep_w$} {:>sl$} {:>dg$} {:>tt$}\n",
-        "Mặt hàng", "----", "SL", "Đ.GIÁ", "T.TIỀN",
-        name_w = NAME_W, sep_w = COL_SEP, sl = COL_SL, dg = COL_DGIA, tt = COL_TTIEN,
-    )
+    let header = format!(
+        "{:<name_w$} {:>sl$} {:>dg$} {:>tt$}\n",
+        "Mặt hàng", "SL", "Đ.GIÁ", "T.TIỀN",
+        name_w = NAME_W, sl = COL_SL, dg = COL_DGIA, tt = COL_TTIEN,
+    );
+    format!("{header}{}\n", "-".repeat(RECEIPT_WIDTH))
 }
 
 pub fn lines_item_row(name: &str, qty: i64, dgia: &str, ttien: &str) -> String {
     let suffix = format!(
-        "{:<sep_w$} {:>sl$} {:>dg$} {:>tt$}",
-        "----", qty, dgia, ttien,
-        sep_w = COL_SEP, sl = COL_SL, dg = COL_DGIA, tt = COL_TTIEN,
+        " {:>sl$} {:>dg$} {:>tt$}",
+        qty, dgia, ttien,
+        sl = COL_SL, dg = COL_DGIA, tt = COL_TTIEN,
     );
     let chars: Vec<char> = name.chars().collect();
     let mut out = String::new();
