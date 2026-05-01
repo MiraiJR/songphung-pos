@@ -19,7 +19,8 @@ song-phung-karaoke/
 │   │   ├── pos/            # Màn hình chính (Left, Center, Right panels)
 │   │   ├── rooms/          # CRUD phòng
 │   │   ├── products/       # CRUD sản phẩm & nhóm
-│   │   └── history/        # Xem lịch sử hóa đơn
+│   │   ├── history/        # Xem lịch sử hóa đơn
+│   │   └── settings/       # Cài đặt máy in + xem trước hóa đơn & QR
 │   ├── hooks/              # Custom hooks (gọi Tauri IPC commands)
 │   ├── store/              # Zustand stores (Global state cho POS)
 │   ├── types/              # TypeScript interfaces/types
@@ -27,9 +28,10 @@ song-phung-karaoke/
 ├── src-tauri/              # Backend (Rust)
 │   ├── src/
 │   │   ├── commands/       # Tauri IPC commands (expose cho Frontend gọi)
+│   │   ├── bill_qr.rs      # Ảnh QR thanh toán: mặc định + file trong App Data
 │   │   ├── database/       # Logic kết nối SQLite, migrations
 │   │   ├── models/         # Rust structs map với DB
-│   │   ├── printer/        # Module xử lý in ấn ESC/POS
+│   │   ├── printer/      # In ESC/POS, định dạng bill, raster QR (escpos_qr.rs), script Windows (.ps1)
 │   │   └── main.rs         # Entry point, setup Tauri
 │   ├── migrations/         # Chứa file SQL tạo bảng
 │   └── tauri.conf.json     # Cấu hình app (window size, permissions)
@@ -156,14 +158,15 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 * **Luồng xác nhận bắt buộc:** Click "Thanh toán" phải mở modal trước, chỉ khi User nhấn "Xác nhận thanh toán" mới thực hiện checkout.
 * **Calculation Rule:** * `Thời gian hát` = (Time hiện tại - gio_bat_dau) -> Quy ra phút.
     * `Tiền giờ` = Math.ceil((Phút * tien_gio) / 60) -> *Làm tròn lên theo yêu cầu*.
-* **Rust IPC Command:** `invoke('checkout_room', { historyId, roomId, endTime, totalItems, totalTime, finalAmount, printReceipt: boolean })`
+* **Rust IPC Command:** `invoke('checkout_room', { payload: { history_id, room_id, final_amount, print_receipt, printer_name_or_ip } })`  
+    (Frontend lưu máy in trong `localStorage`, truyền `printer_name_or_ip` khi cần in.)
 * **Logic (Backend):**
     1. Update `lich_su_phong` với các thông tin thanh toán, chuyển trạng thái thành `DA_THANH_TOAN`.
     2. Update `phong` -> `trang_thai = 'TRONG'`.
-    3. Nếu `printReceipt == true`, gọi thẳng hàm in (Feature 5).
+    3. Nếu `print_receipt == true`, gọi luồng in (Feature 5), **kèm ảnh QR thanh toán** (Feature 5b — cùng template với phiếu tạm / in lại).
 
 ### Feature 5: In hóa đơn (ESC/POS Printer)
-* **Tiếp cận:** Sử dụng thư viện Rust. Crate khuyên dùng: **`escpos`** hoặc **`printer-pos`**. Nếu dùng kết nối USB trên Windows có thể phức tạp, ưu tiên kết nối máy in qua **Network (TCP/IP)** hoặc Share Printer qua driver của Windows rồi bắn raw data.
+* **Tiếp cận:** Encode nội dung tiếng Việt **Windows code page 1258** (ESC `t`), gửi **raw ESC/POS** qua mạng (`TCP :9100`) hoặc qua `lp -o raw` (macOS/Linux). Trên **Windows** với máy in hệ thống: script **PowerShell** + `System.Drawing.Printing` in Unicode (Courier New), không gửi raw bytes qua driver chữ.
 * **Kiểm tra kết nối trước khi in (BẮT BUỘC):**
     1. Khi User tick `[x] In hóa đơn` trong modal thanh toán, frontend gọi IPC `invoke('check_printer_connection')`.
     2. Nếu kết nối thành công: hiển thị trạng thái xanh "Đã kết nối máy in".
@@ -173,8 +176,23 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     * Header: TÊN QUÁN (Song Phụng), Địa chỉ, Ngày giờ in.
     * Info: Tên phòng, Giờ vào, Giờ ra.
     * Table món: Tên món - SL - Đơn giá - Thành tiền (Căn đều trái phải).
-    * Footer: Tiền giờ, Tổng cộng. Lời cảm ơn.
-* **Tauri Logic:** Render template bằng Rust format string, convert sang byte array ESC/POS và đẩy qua TCP socket (ví dụ `192.168.1.100:9100`) của máy XPrinter.
+    * Footer: Tiền giờ, Tổng cộng / tạm tính (tuỳ loại phiếu).
+    * **Vị trí mã QR:** Một dòng marker **`@@BILL_QR@@`** (hằng `BILL_QR_MARKER_LINE` trong Rust) được chèn **sau** block tổng tiền và **trước** dòng cảm ơn *"HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!"*. Khi in, marker không in ra chữ mà được thay bằng ảnh QR (xem Feature 5b).
+* **Tauri Logic:** Chuỗi template trong `commands/mod.rs` (`compose_receipt_bill`, `compose_temporary_bill`), module `printer/mod.rs` ghép bytes ESC/POS và cắt giấy (`GS V`).
+
+### Feature 5b: Mã QR trên mọi phiếu in (thanh toán, tạm tính, in lại)
+* **Nguồn ảnh:**
+    * **Mặc định:** ảnh PNG đóng gói sẵn (`src/assets/qr_code.png`, embed trong Rust qua `bill_qr.rs`).
+    * **Tuỳ chỉnh:** file `bill_qr_code.png` trong thư mục **App Data** của app (ghi khi user tải ảnh mới ở Cài đặt). Xóa file hoặc **Khôi phục QR gốc** → dùng lại ảnh mặc định.
+* **API Rust:** `qr_png_for_print(app)` luôn trả về bytes PNG (fallback bundle nếu đọc file lỗi). `print_receipt_to_target` nếu thấy marker trong nội dung mà không có bytes QR hợp lệ thì vẫn fallback sang ảnh mặc định — tránh phiếu không có QR.
+* **Luồng in có QR (đồng nhất):**
+    * **Thanh toán + In hóa đơn:** `checkout_room` → `compose_receipt_bill` (có marker) → `print_receipt_to_target(..., Some(qr))`.
+    * **In phiếu tạm tính:** `print_temporary_bill` → `compose_temporary_bill` (có marker) → cùng `print_receipt_to_target`.
+    * **In lại từ lịch sử:** `reprint_history_bill` → `compose_receipt_bill` → cùng `print_receipt_to_target`.
+    * **In thử (Cài đặt):** `test_printer` → mẫu `compose_printer_test_sample_receipt` (có marker) + QR hiện tại.
+* **Kỹ thuật in ảnh:**
+    * **Mạng / macOS / Linux (raw):** Chuyển PNG sang raster **ESC/POS `GS v 0`** (module `printer/escpos_qr.rs`), rộng tối đa ~384 dot, căn giữa (`ESC a`).
+    * **Windows (PrintDocument):** `printer/windows_unicode_print.ps1` nhận `-QrImagePath`; khi gặp dòng đúng bằng `@@BILL_QR@@`, vẽ ảnh PNG căn giữa trang thay vì in chữ.
 
 ### Feature 6, 7 & 8: CRUD Quản trị (Phòng, Sản phẩm & Nhóm sản phẩm)
 * **UI:** Nằm ở các View riêng (Routing: `/admin/rooms`, `/admin/products`, `/admin/categories`).
@@ -206,30 +224,37 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
 * **In lại hóa đơn:**
     * Frontend phải gọi IPC kiểm tra kết nối máy in trước: `invoke('check_printer_connection')`.
     * Nếu **không kết nối**: hiển thị lỗi trên UI và không thực hiện in.
-    * Nếu **đã kết nối**: gọi IPC in lại bill: `invoke('reprint_history_bill', { historyId })`.
-    * Backend render lại nội dung hóa đơn từ dữ liệu `lich_su_phong` + `lich_su_phong_san_pham`, sau đó in qua TCP socket ESC/POS.
+    * Nếu **đã kết nối**: gọi IPC in lại bill: `invoke('reprint_history_bill', { historyId, printerAddr })` (địa chỉ máy in lấy từ `localStorage` như các luồng in khác).
+    * Backend render lại nội dung hóa đơn từ `lich_su_phong` + `lich_su_phong_san_pham` (**cùng template và marker QR** như lúc thanh toán), ghép ảnh QR hiện tại (`qr_png_for_print`), rồi in (raw ESC/POS hoặc Windows như Feature 5/5b).
 
 ### Feature 11: Kiểm tra & Cài đặt Máy in (Printer Setup & Test)
-* **UI:** Có thể làm một Modal pop-up (Dialog) gọi từ màn hình chính (Left Panel) hoặc một View `/settings` nhỏ.
+* **UI:** View **`/admin/settings`** (menu **Cài đặt**). Component: `src/features/settings/PrinterSettingsPage.tsx`.
 * **Tính năng (Chỉ lưu Local State):**
     * Combobox/Dropdown hiển thị danh sách các máy in đang cài đặt trên máy tính (System Printers) hoặc input để nhập IP máy in mạng.
-    * Nút **[In thử / Kiểm tra kết nối]** (Không cần nút Lưu vào DB).
-    * Hiển thị trạng thái kết nối trực quan: 🟢 Đã kết nối / Sẵn sàng (Kèm tên Model máy in) hoặc 🔴 Mất kết nối.
+    * Nút **[In thử / Kiểm tra kết nối]** — in **mẫu hóa đơn đầy đủ** (giống preview) **và mã QR** (đúng như phiếu thật / Feature 5b).
+    * Hiển thị trạng thái kết nối trực quan: 🟢 Đã kết nối hoặc 🔴 Lỗi.
+    * **Xem trước:** Khối text mẫu K80 (`get_sample_receipt_preview`) — trên UI dòng marker QR được thay bằng placeholder để dễ đọc; **ảnh QR hiện tại** hiển thị ngay bên dưới (data URL từ backend).
+    * **Ảnh QR:** Nút **Tải ảnh QR mới** (PNG/JPEG) → `save_bill_qr_png`; nút **Khôi phục QR gốc** → `reset_bill_qr_png` (xóa file trong App Data, dùng lại ảnh bundle).
 * **Rust IPC Command:**
-    * `invoke('get_system_printers')` -> Trả về mảng `string[]` tên các máy in hiện có trên OS (dùng crate `printers` hoặc winapi).
-    * `invoke('test_printer', { printerNameOrIp })` -> Thực hiện kết nối và bắn một lệnh ESC/POS đơn giản để in dòng chữ: *"TEST KẾT NỐI MÁY IN SONG PHỤNG... OK"* kèm tiếng cắt giấy/bíp. Trả về `Result<Ok, Error>` để Frontend xử lý Toast Notification.
-* **Logic (Frontend - Zustand / LocalStorage):** * Khi người dùng test thành công và chọn một máy in, lưu tên/IP của máy in đó vào `localStorage` (thông qua Zustand middleware `persist`). 
-    * Ở **Feature 4 (Thanh toán)**, khi gọi lệnh `checkout_room`, Frontend sẽ lấy giá trị máy in từ `localStorage` để truyền kèm vào IPC command cho Backend biết phải in hóa đơn ra máy nào. 
-    * Mỗi lần app khởi động, trạng thái máy in sẽ tự động đọc từ `localStorage` và báo cho người dùng biết trên giao diện.
+    * `invoke('get_system_printers')` → `string[]` tên máy in (PowerShell `Get-Printer` trên Windows, `lpstat` trên Unix).
+    * `invoke('get_sample_receipt_preview')` → chuỗi text mẫu (có marker `@@BILL_QR@@` trong payload thật; UI có thể ẩn marker khi hiển thị).
+    * `invoke('get_bill_qr_preview_data_url')` → `data:image/png;base64,...` của QR đang dùng để in.
+    * `invoke('save_bill_qr_png', { bytes: number[] })` → validate ảnh, ghi vào App Data.
+    * `invoke('reset_bill_qr_png')` → xóa file tuỳ chỉnh, về ảnh mặc định.
+    * `invoke('test_printer', { printerNameOrIp })` (Frontend; Tauri map sang tham số Rust `printer_name_or_ip`) → Kiểm tra kết nối và in mẫu **kèm QR** (ESC/POS hoặc Windows như Feature 5b). Trả về `Result` để Frontend toast (Sonner).
+* **Logic (Frontend / LocalStorage):**
+    * Khi test thành công, lưu tên/IP máy in vào `localStorage` (key ví dụ `songphung_printer_target`).
+    * **Feature 4**, **Feature 12**, **Feature 10 (in lại)** đều đọc cùng giá trị này và truyền vào IPC (`printer_name_or_ip` / `printerAddr`).
+    * Mỗi lần app khởi động, đọc lại `localStorage` để hiển thị máy in đang chọn.
 
 ### Feature 12: In phiếu tạm tính (Print Pro-forma Invoice)
 * **Mục đích:** Chỉ in hóa đơn để khách xem, không đóng phòng, không cập nhật trạng thái thanh toán.
 * **Trigger:** Click nút **[In phiếu]** trên Panel Left.
 * **Logic xử lý:**
     1. Frontend lấy toàn bộ thông tin hiện tại: Danh sách món, Giờ bắt đầu, Giờ hiện tại (để tính tiền giờ tạm tính).
-    2. Gọi IPC Command: `invoke('print_temporary_bill', { data, printerNameOrIp })`.
-    3. Backend Rust nhận data, format template tương tự hóa đơn thật nhưng có tiêu đề là **"PHIẾU TẠM TÍNH"**.
-    4. Gửi lệnh tới máy in.
+    2. Gọi IPC Command: `invoke('print_temporary_bill', { data, printer_name_or_ip })` (`data` gồm phòng, giờ bắt đầu, giờ hiện tại, dòng món, các tổng tiền).
+    3. Backend Rust nhận data, format template **"PHIẾU TẠM TÍNH"** — **cùng footer có marker QR và dòng cảm ơn** như hóa đơn chính thức (Feature 5b).
+    4. Ghép ảnh QR (`qr_png_for_print`) và gửi tới máy in.
 * **Ràng buộc:** Chỉ áp dụng cho phòng đang `DANG_HOAT_DONG`. Không thực hiện bất kỳ câu lệnh `UPDATE` nào vào Database.
 
 ### Feature 13: Import & Export CSV (với logic Upsert)

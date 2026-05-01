@@ -297,6 +297,8 @@ fn compose_receipt_bill(
         &format_currency(total_paid),
     ));
     content.push_str(&rf::line_sep());
+    content.push_str(crate::printer::BILL_QR_MARKER_LINE);
+    content.push('\n');
     content.push_str(&rf::lines_wrapped_centered(
         "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
     ));
@@ -350,6 +352,8 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         &format_currency(data.tong_tam_tinh),
     ));
     content.push_str(&rf::line_sep());
+    content.push_str(crate::printer::BILL_QR_MARKER_LINE);
+    content.push('\n');
     content.push_str(&rf::lines_wrapped_centered(
         "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
     ));
@@ -396,6 +400,26 @@ fn compose_printer_test_sample_receipt() -> String {
 #[tauri::command]
 pub fn get_sample_receipt_preview() -> String {
     compose_printer_test_sample_receipt()
+}
+
+#[tauri::command]
+pub fn get_bill_qr_preview_data_url(app: tauri::AppHandle) -> Result<String, String> {
+    let bytes = crate::bill_qr::load_bill_qr_png(&app)?;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    Ok(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(&bytes)
+    ))
+}
+
+#[tauri::command]
+pub fn save_bill_qr_png(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+    crate::bill_qr::save_bill_qr_png(&app, &bytes)
+}
+
+#[tauri::command]
+pub fn reset_bill_qr_png(app: tauri::AppHandle) -> Result<(), String> {
+    crate::bill_qr::reset_bill_qr_png(&app)
 }
 
 #[tauri::command]
@@ -895,6 +919,7 @@ pub async fn cancel_room(
 
 #[tauri::command]
 pub async fn checkout_room(
+    app: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     payload: CheckoutPayload,
 ) -> Result<(), String> {
@@ -989,7 +1014,8 @@ pub async fn checkout_room(
             tong_tien_gio,
             payload.final_amount,
         );
-        let _ = crate::printer::print_receipt_to_target(&target, &content);
+        let qr = crate::bill_qr::qr_png_for_print(&app);
+        let _ = crate::printer::print_receipt_to_target(&target, &content, Some(&qr));
     }
     Ok(())
 }
@@ -1135,31 +1161,38 @@ pub async fn get_system_printers() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn test_printer(printer_name_or_ip: String) -> Result<String, String> {
+pub async fn test_printer(
+    app: tauri::AppHandle,
+    printer_name_or_ip: String,
+) -> Result<String, String> {
     let target = printer_name_or_ip.trim();
     if target.is_empty() {
         return Err("Vui lòng chọn hoặc nhập máy in trước khi kiểm tra.".to_string());
     }
     crate::printer::check_printer_target_connection(target)?;
     let content = compose_printer_test_sample_receipt();
-    crate::printer::print_receipt_to_target(target, &content)?;
+    let qr = crate::bill_qr::qr_png_for_print(&app);
+    crate::printer::print_receipt_to_target(target, &content, Some(&qr))?;
     Ok(format!("Đã kiểm tra thành công máy in: {target}"))
 }
 
 #[tauri::command]
 pub async fn print_temporary_bill(
+    app: tauri::AppHandle,
     data: TemporaryBillData,
     printer_name_or_ip: Option<String>,
 ) -> Result<String, String> {
     let target = resolve_printer_target(printer_name_or_ip)?;
     crate::printer::check_printer_target_connection(&target)?;
     let content = compose_temporary_bill(&data);
-    crate::printer::print_receipt_to_target(&target, &content)?;
+    let qr = crate::bill_qr::qr_png_for_print(&app);
+    crate::printer::print_receipt_to_target(&target, &content, Some(&qr))?;
     Ok("Đã in phiếu tạm tính.".to_string())
 }
 
 #[tauri::command]
 pub async fn reprint_history_bill(
+    app: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     history_id: i64,
     printer_addr: Option<String>,
@@ -1216,7 +1249,8 @@ pub async fn reprint_history_bill(
             .map_err(|e| e.to_string())?,
     );
 
-    crate::printer::print_receipt_to_target(&address, &content)?;
+    let qr = crate::bill_qr::qr_png_for_print(&app);
+    crate::printer::print_receipt_to_target(&address, &content, Some(&qr))?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))
 }
 

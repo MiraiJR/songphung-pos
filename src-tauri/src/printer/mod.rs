@@ -1,10 +1,17 @@
 pub mod receipt_format;
 
+mod escpos_qr;
+
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 use unicode_normalization::UnicodeNormalization;
+
+/// Single line in composed receipt text; replaced by QR bitmap when printing.
+pub const BILL_QR_MARKER_LINE: &str = "@@BILL_QR@@";
+
+const QR_PRINT_WIDTH_DOTS: u32 = 384;
 
 #[cfg(target_os = "windows")]
 const WINDOWS_UNICODE_PRINT_PS1: &str = include_str!("windows_unicode_print.ps1");
@@ -244,31 +251,56 @@ fn encode_vietnamese_cp1258(content: &str) -> Vec<u8> {
     out
 }
 
-fn receipt_print_bytes(content: &str) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(content.len() + 64);
+fn receipt_print_bytes(content: &str, qr_png: Option<&[u8]>) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::with_capacity(content.len() + 4096);
 
     buf.extend_from_slice(&[0x1B, 0x40]);                            // ESC @ init
     buf.extend_from_slice(&[0x1B, 0x74, ESC_POS_CODE_PAGE_WPC1258]); // ESC t n
     buf.extend_from_slice(&[0x1D, 0x21, 0x00]);                      // GS ! standard size
     buf.extend_from_slice(&[0x1B, 0x45, 0x01]);                      // ESC E bold ON
 
-    buf.extend_from_slice(&encode_vietnamese_cp1258(content));
+    let segments: Vec<&str> = content.split(BILL_QR_MARKER_LINE).collect();
+    match segments.len() {
+        1 => {
+            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[0]));
+        }
+        2 => {
+            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[0]));
+            if let Some(png) = qr_png {
+                buf.extend_from_slice(&[0x1B, 0x61, 0x01]); // center
+                buf.extend_from_slice(&escpos_qr::png_to_esc_pos_gs_v0(
+                    png,
+                    QR_PRINT_WIDTH_DOTS,
+                )?);
+                buf.extend_from_slice(&[0x1B, 0x61, 0x00]); // left
+                buf.push(0x0A);
+            }
+            buf.extend_from_slice(&encode_vietnamese_cp1258(segments[1]));
+        }
+        _ => {
+            return Err("Nội dung hóa đơn có nhiều hơn một vị trí mã QR.".to_string());
+        }
+    }
 
     buf.extend_from_slice(&[0x1B, 0x45, 0x00]);                      // ESC E bold OFF
     buf.push(0x0A);
     buf.push(0x0A);
     buf.extend_from_slice(&[0x1D, 0x56, 0x41, 0x10]);                // GS V partial cut
 
-    buf
+    Ok(buf)
 }
 
 // ---------------------------------------------------------------------------
 // Printer I/O
 // ---------------------------------------------------------------------------
 
-pub fn print_receipt_to_network(printer_addr: &str, content: &str) -> Result<(), String> {
+pub fn print_receipt_to_network(
+    printer_addr: &str,
+    content: &str,
+    qr_png: Option<&[u8]>,
+) -> Result<(), String> {
     let mut stream = TcpStream::connect(printer_addr).map_err(|e| e.to_string())?;
-    let bytes = receipt_print_bytes(content);
+    let bytes = receipt_print_bytes(content, qr_png)?;
     stream.write_all(&bytes).map_err(|e| e.to_string())
 }
 
@@ -330,7 +362,11 @@ fn is_network_target(target: &str) -> bool {
     target.contains(':')
 }
 
-fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), String> {
+fn print_receipt_to_system(
+    printer_name: &str,
+    content: &str,
+    qr_png: Option<&[u8]>,
+) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let temp = std::env::temp_dir();
@@ -341,6 +377,15 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
         let id = format!("{}_{stamp}", std::process::id());
         let txt_path = temp.join(format!("songphung_{id}.txt"));
         let ps1_path = temp.join(format!("songphung_unicode_{id}.ps1"));
+        let qr_path =
+            if content.contains(BILL_QR_MARKER_LINE) && qr_png.is_some() {
+                Some(temp.join(format!("songphung_qr_{id}.png")))
+            } else {
+                None
+            };
+        if let (Some(ref path), Some(bytes)) = (&qr_path, qr_png) {
+            std::fs::write(path, bytes).map_err(|e| format!("Không ghi ảnh QR in tạm: {e}"))?;
+        }
 
         let windows_text = content.replace('\n', "\r\n");
         std::fs::write(&txt_path, windows_text.as_bytes())
@@ -355,6 +400,12 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
             .to_str()
             .ok_or_else(|| "Đường dẫn script in tạm không hợp lệ.".to_string())?;
 
+        let qr_str = qr_path
+            .as_ref()
+            .and_then(|p| p.to_str())
+            .unwrap_or("")
+            .to_string();
+
         let output = powershell_command()
             .args([
                 "-NoProfile",
@@ -366,12 +417,17 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
                 txt_str,
                 "-Printer",
                 printer_name,
+                "-QrImagePath",
+                &qr_str,
             ])
             .output()
             .map_err(|e| format!("Không chạy PowerShell để in: {e}"))?;
 
         let _ = std::fs::remove_file(&ps1_path);
         let _ = std::fs::remove_file(&txt_path);
+        if let Some(ref path) = qr_path {
+            let _ = std::fs::remove_file(path);
+        }
         if output.status.success() {
             return Ok(());
         }
@@ -387,7 +443,7 @@ fn print_receipt_to_system(printer_name: &str, content: &str) -> Result<(), Stri
 
     #[cfg(not(target_os = "windows"))]
     {
-        let bytes = receipt_print_bytes(content);
+        let bytes = receipt_print_bytes(content, qr_png)?;
         let mut child = Command::new("lp")
             .args(["-d", printer_name, "-o", "raw"])
             .stdin(std::process::Stdio::piped())
@@ -422,11 +478,26 @@ pub fn check_printer_target_connection(printer_name_or_ip: &str) -> Result<(), S
     }
 }
 
-pub fn print_receipt_to_target(printer_name_or_ip: &str, content: &str) -> Result<(), String> {
-    if is_network_target(printer_name_or_ip) {
-        return print_receipt_to_network(printer_name_or_ip, content);
+fn resolve_qr_png_for_bill_content<'a>(content: &str, qr_png: Option<&'a [u8]>) -> Option<&'a [u8]> {
+    if !content.contains(BILL_QR_MARKER_LINE) {
+        return qr_png;
     }
-    print_receipt_to_system(printer_name_or_ip, content)
+    match qr_png {
+        Some(bytes) if !bytes.is_empty() => Some(bytes),
+        Some(_) | None => Some(crate::bill_qr::default_qr_png_bytes()),
+    }
+}
+
+pub fn print_receipt_to_target(
+    printer_name_or_ip: &str,
+    content: &str,
+    qr_png: Option<&[u8]>,
+) -> Result<(), String> {
+    let qr = resolve_qr_png_for_bill_content(content, qr_png);
+    if is_network_target(printer_name_or_ip) {
+        return print_receipt_to_network(printer_name_or_ip, content, qr);
+    }
+    print_receipt_to_system(printer_name_or_ip, content, qr)
 }
 
 #[cfg(test)]

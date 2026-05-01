@@ -1,3 +1,4 @@
+mod bill_qr;
 mod commands;
 mod csv_import;
 mod database;
@@ -39,6 +40,9 @@ pub fn run() {
             commands::checkout_room,
             commands::get_system_printers,
             commands::get_sample_receipt_preview,
+            commands::get_bill_qr_preview_data_url,
+            commands::save_bill_qr_png,
+            commands::reset_bill_qr_png,
             commands::test_printer,
             commands::print_temporary_bill,
             commands::check_printer_connection,

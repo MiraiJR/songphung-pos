@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Path,
-    [Parameter(Mandatory = $true)][string]$Printer
+    [Parameter(Mandatory = $true)][string]$Printer,
+    [Parameter(Mandatory = $false)][string]$QrImagePath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,7 @@ $lineIndex = 0
 $lines = $text -split "`r?`n"
 
 $LARGE_MARKER = "@@LARGE@@"
+$BILL_QR_MARKER = "@@BILL_QR@@"
 $RECEIPT_CHARS = 32
 
 $handler = [System.Drawing.Printing.PrintPageEventHandler]{
@@ -45,10 +47,36 @@ $handler = [System.Drawing.Printing.PrintPageEventHandler]{
         $script:xOffset = [Math]::Max(0, ($e.PageBounds.Width - $refSize.Width) / 2)
     }
 
-    while ($lineIndex -lt $lines.Length) {
-        $line = $lines[$lineIndex]
+        while ($lineIndex -lt $lines.Length) {
+            $line = $lines[$lineIndex]
 
-        if ($line.StartsWith($LARGE_MARKER)) {
+            if ($line -eq $BILL_QR_MARKER) {
+                $lineIndex++
+                if ($QrImagePath -and (Test-Path -LiteralPath $QrImagePath)) {
+                    $img = [System.Drawing.Image]::FromFile($QrImagePath)
+                    try {
+                        $maxW = [Math]::Max(50, $e.PageBounds.Width - 24)
+                        $tw = [Math]::Min($img.Width, $maxW)
+                        $scale = $tw / $img.Width
+                        $th = [int][Math]::Ceiling($img.Height * $scale)
+                        $lineHeight = $th + 8
+                        $y_check = if ($lineIndex -eq 0) { 0 } else { $script:currentY }
+                        if ($y_check + $lineHeight -gt $e.PageBounds.Height) {
+                            $e.HasMorePages = $true
+                            return
+                        }
+                        $drawX = ($e.PageBounds.Width - $tw) / 2
+                        $destRect = New-Object System.Drawing.Rectangle([int]$drawX, [int]$script:currentY, [int]$tw, [int]$th)
+                        $g.DrawImage($img, $destRect)
+                        $script:currentY += $lineHeight
+                    } finally {
+                        $img.Dispose()
+                    }
+                }
+                continue
+            }
+
+            if ($line.StartsWith($LARGE_MARKER)) {
             $line = $line.Substring($LARGE_MARKER.Length)
             $font = $fontLarge
         } else {
