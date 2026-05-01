@@ -422,7 +422,7 @@ pub fn get_sample_receipt_preview() -> String {
 
 #[tauri::command]
 pub fn get_bill_qr_preview_data_url(app: tauri::AppHandle) -> Result<String, String> {
-    let bytes = crate::bill_qr::load_bill_qr_png(&app)?;
+    let bytes = crate::bill_qr::qr_png_for_preview(&app);
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     Ok(format!(
         "data:image/png;base64,{}",
@@ -1032,7 +1032,7 @@ pub async fn checkout_room(
             tong_tien_gio,
             payload.final_amount,
         );
-        let qr = crate::bill_qr::qr_png_for_print(&app);
+        let qr = crate::bill_qr::qr_png_for_bill(&app, payload.final_amount);
         let _ = crate::printer::print_receipt_to_target(&target, &content, Some(&qr));
     }
     Ok(())
@@ -1285,7 +1285,7 @@ pub async fn test_printer(
     }
     crate::printer::check_printer_target_connection(target)?;
     let content = compose_printer_test_sample_receipt();
-    let qr = crate::bill_qr::qr_png_for_print(&app);
+    let qr = crate::bill_qr::qr_png_for_bill(&app, 451_000.0);
     crate::printer::print_receipt_to_target(target, &content, Some(&qr))?;
     Ok(format!("Đã kiểm tra thành công máy in: {target}"))
 }
@@ -1299,7 +1299,7 @@ pub async fn print_temporary_bill(
     let target = resolve_printer_target(printer_name_or_ip)?;
     crate::printer::check_printer_target_connection(&target)?;
     let content = compose_temporary_bill(&data);
-    let qr = crate::bill_qr::qr_png_for_print(&app);
+    let qr = crate::bill_qr::qr_png_for_bill(&app, data.tong_tam_tinh);
     crate::printer::print_receipt_to_target(&target, &content, Some(&qr))?;
     Ok("Đã in phiếu tạm tính.".to_string())
 }
@@ -1344,6 +1344,9 @@ pub async fn reprint_history_bill(
     .await
     .map_err(|e| e.to_string())?;
 
+    let tong_thanh_toan = bill
+        .try_get::<f64, _>("tong_tien_thanh_toan")
+        .map_err(|e| e.to_string())?;
     let content = compose_receipt_bill(
         history_id,
         &bill.try_get::<String, _>("ten_phong")
@@ -1359,11 +1362,10 @@ pub async fn reprint_history_bill(
             .map_err(|e| e.to_string())?,
         bill.try_get::<f64, _>("tong_tien_gio")
             .map_err(|e| e.to_string())?,
-        bill.try_get::<f64, _>("tong_tien_thanh_toan")
-            .map_err(|e| e.to_string())?,
+        tong_thanh_toan,
     );
 
-    let qr = crate::bill_qr::qr_png_for_print(&app);
+    let qr = crate::bill_qr::qr_png_for_bill(&app, tong_thanh_toan);
     crate::printer::print_receipt_to_target(&address, &content, Some(&qr))?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))
 }
