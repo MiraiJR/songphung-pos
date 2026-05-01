@@ -63,6 +63,18 @@ export function useKaraoke() {
     void loadCurrentSession(selectedRoomId);
   }, [selectedRoomId, loadCurrentSession]);
 
+  const selectedRoomIsActive = selectedRoom?.trang_thai === "DANG_HOAT_DONG";
+
+  useEffect(() => {
+    if (selectedRoomId == null || !selectedRoomIsActive) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadCurrentSession(selectedRoomId);
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [selectedRoomId, selectedRoomIsActive, loadCurrentSession]);
+
   return {
     rooms,
     products,
