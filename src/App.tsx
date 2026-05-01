@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { X } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
+import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
 import { CategoriesAdminPage } from "./features/categories/CategoriesAdminPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { PosPage } from "@/features/pos/PosPage";
@@ -89,6 +91,8 @@ function AppShell() {
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
+  const [temporaryBillModalOpen, setTemporaryBillModalOpen] = useState(false);
+  const [temporaryBillNow, setTemporaryBillNow] = useState("");
   const [checkoutAmount, setCheckoutAmount] = useState("0");
   const [checkoutHourAmount, setCheckoutHourAmount] = useState("0");
   const [checkoutPrintReceipt, setCheckoutPrintReceipt] = useState(true);
@@ -211,13 +215,22 @@ function AppShell() {
     await karaoke.loadCurrentSession(targetRoomId);
   }
 
+  async function requestTemporaryBill() {
+    if (karaoke.selectedRoom?.trang_thai !== "DANG_HOAT_DONG" || !karaoke.currentSession) {
+      window.alert("Chỉ in phiếu tạm tính khi phòng đang hoạt động.");
+      return;
+    }
+    setTemporaryBillNow(formatLocalDateTimeForBill(new Date()));
+    setTemporaryBillModalOpen(true);
+  }
+
   async function handlePrintTemporaryBill() {
     if (karaoke.selectedRoom?.trang_thai !== "DANG_HOAT_DONG" || !karaoke.currentSession) {
       window.alert("Chỉ in phiếu tạm tính khi phòng đang hoạt động.");
       return;
     }
     const s = karaoke.currentSession;
-    const gio_hien_tai = formatLocalDateTimeForBill(new Date());
+    const gio_hien_tai = temporaryBillNow || formatLocalDateTimeForBill(new Date());
     setPrintTemporaryBillLoading(true);
     try {
       await invoke("print_temporary_bill", {
@@ -242,6 +255,7 @@ function AppShell() {
           selectedQrThanhToanId,
         }),
       });
+      setTemporaryBillModalOpen(false);
     } catch (error) {
       alertInvokeError(error, "Không in được phiếu tạm tính:");
     } finally {
@@ -452,7 +466,7 @@ function AppShell() {
                 onCancelRoom={requestCancelRoom}
                 onCheckout={requestCheckout}
                 onTransferRoom={handleTransferRoom}
-                onPrintTemporaryBill={handlePrintTemporaryBill}
+                onPrintTemporaryBill={requestTemporaryBill}
                 printTemporaryBillLoading={printTemporaryBillLoading}
               />
               {orderModalOpen && selectedProduct && (
@@ -545,71 +559,143 @@ function AppShell() {
                 </div>
               )}
               {checkoutModalOpen && karaoke.currentSession && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="relative w-[460px] rounded-lg bg-white p-4 shadow-lg">
-                    <button
-                      type="button"
-                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                      onClick={() => setCheckoutModalOpen(false)}
-                      aria-label="Đóng"
-                    >
-                      <X size={18} />
-                    </button>
-                    <h3 className="mb-2 text-lg font-semibold">Xác nhận thanh toán</h3>
-                    <div className="space-y-1 text-sm">
-                      <div>
-                        <span className="text-slate-500">Phòng:</span> {karaoke.currentSession.ten_phong}
+                <ConfirmBillActionModal
+                  open={checkoutModalOpen}
+                  title="Xác nhận thanh toán"
+                  confirmText="Xác nhận thanh toán"
+                  onClose={() => setCheckoutModalOpen(false)}
+                  onConfirm={() => void confirmCheckout()}
+                  leftContent={
+                    <>
+                      <div className="space-y-1 text-sm">
+                        <div>
+                          <span className="text-slate-500">Phòng:</span> {karaoke.currentSession.ten_phong}
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Tiền món:</span>{" "}
+                          {Math.ceil(karaoke.currentSession.tong_tien_san_pham).toLocaleString()}
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-slate-500">Tiền món:</span>{" "}
-                        {Math.ceil(karaoke.currentSession.tong_tien_san_pham).toLocaleString()}
+                      <div className="mt-3">
+                        <label className="mb-1 block text-sm text-slate-600">Tiền giờ</label>
+                        <input
+                          className="w-full rounded border px-3 py-2 text-right text-xl"
+                          value={checkoutHourAmount}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, "");
+                            const nextHour = digits === "" ? "" : formatAmountDigits(digits);
+                            setCheckoutHourAmount(nextHour);
+                            const hour = digits === "" ? 0 : Number(digits);
+                            const tienMon = Math.max(0, Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0));
+                            setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
+                          }}
+                          inputMode="numeric"
+                        />
                       </div>
-                    </div>
-                    <div className="mt-3">
-                      <label className="mb-1 block text-sm text-slate-600">Tiền giờ</label>
-                      <input
-                        className="w-full rounded border px-3 py-2 text-right text-xl"
-                        value={checkoutHourAmount}
-                        onChange={(e) => {
-                          const digits = e.target.value.replace(/\D/g, "");
-                          const nextHour = digits === "" ? "" : formatAmountDigits(digits);
-                          setCheckoutHourAmount(nextHour);
-                          const hour = digits === "" ? 0 : Number(digits);
-                          const tienMon = Math.max(0, Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0));
-                          setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
-                        }}
-                        inputMode="numeric"
-                      />
-                    </div>
-                    <div className="mt-3">
-                      <label className="mb-1 block text-sm text-slate-600">Thành tiền</label>
-                      <input
-                        className="w-full rounded border px-3 py-2 text-right text-xl"
-                        value={checkoutAmount}
-                        onChange={(e) => {
-                          const digits = e.target.value.replace(/\D/g, "");
-                          setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
-                        }}
-                        inputMode="numeric"
-                      />
-                    </div>
-                    <label className="mt-3 inline-flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={checkoutPrintReceipt}
-                        onCheckedChange={(checked) => {
-                          const next = checked === true;
-                          setCheckoutPrintReceipt(next);
-                          if (next) {
-                            void checkPrinterConnection();
-                          } else {
-                            setPrinterConnected(null);
-                            setPrinterMessage("");
-                          }
-                        }}
-                      />
-                      In hóa đơn
-                    </label>
-                    {checkoutPrintReceipt && (
+                      <div className="mt-3">
+                        <label className="mb-1 block text-sm text-slate-600">Thành tiền</label>
+                        <input
+                          className="w-full rounded border px-3 py-2 text-right text-xl"
+                          value={checkoutAmount}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, "");
+                            setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
+                          }}
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <label className="mt-3 inline-flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={checkoutPrintReceipt}
+                          onCheckedChange={(checked) => {
+                            const next = checked === true;
+                            setCheckoutPrintReceipt(next);
+                            if (next) {
+                              void checkPrinterConnection();
+                            } else {
+                              setPrinterConnected(null);
+                              setPrinterMessage("");
+                            }
+                          }}
+                        />
+                        In hóa đơn
+                      </label>
+                      {checkoutPrintReceipt && (
+                        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
+                          <label className="mb-2 flex items-center gap-2 text-sm">
+                            <Checkbox
+                              checked={printBillQr}
+                              onCheckedChange={(checked) => persistQrPrint(checked === true)}
+                            />
+                            In mã QR
+                          </label>
+                          <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
+                            <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
+                            <Select
+                              value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
+                              onChange={(e) => {
+                                const id = Number(e.target.value);
+                                persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                              }}
+                            >
+                              <option value="">-- Chọn QR --</option>
+                              {qrThanhToanList.map((item) => (
+                                <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
+                                  {item.qr_thanh_toan_ten}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                        </div>
+                      )}
+                      {checkoutPrintReceipt && (
+                        <div
+                          className={`mt-2 rounded px-2 py-1 text-sm ${printerConnected ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                            }`}
+                        >
+                          {printerChecking ? "Đang kiểm tra kết nối máy in..." : printerMessage || "Chưa kiểm tra máy in"}
+                        </div>
+                      )}
+                    </>
+                  }
+                  rightContent={
+                    <BillTemplatePreview
+                      title="PHIẾU THANH TOÁN"
+                      items={karaoke.currentSession.items.map((item) => ({
+                        id: `checkout-pv-${item.san_pham_id}`,
+                        name: item.ten_san_pham,
+                        qty: item.so_luong,
+                        amount: item.thanh_tien,
+                      }))}
+                      productTotal={karaoke.currentSession.tong_tien_san_pham}
+                      hourTotal={Math.max(0, parseAmountInput(checkoutHourAmount) || 0)}
+                      grandTotal={Math.max(0, parseAmountInput(checkoutAmount) || 0)}
+                    />
+                  }
+                />
+              )}
+              {temporaryBillModalOpen && karaoke.currentSession && (
+                <ConfirmBillActionModal
+                  open={temporaryBillModalOpen}
+                  title="Xác nhận in phiếu tạm tính"
+                  confirmText={printTemporaryBillLoading ? "Đang in..." : "Xác nhận in phiếu"}
+                  busy={printTemporaryBillLoading}
+                  onClose={() => setTemporaryBillModalOpen(false)}
+                  onConfirm={() => void handlePrintTemporaryBill()}
+                  leftContent={
+                    <>
+                      <div className="space-y-1 text-sm">
+                        <div>
+                          <span className="text-slate-500">Phòng:</span> {karaoke.currentSession.ten_phong}
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Giờ vào:</span> {karaoke.currentSession.gio_bat_dau}
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Giờ hiện tại:</span> {temporaryBillNow}
+                        </div>
+                      </div>
                       <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
                         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
                         <label className="mb-2 flex items-center gap-2 text-sm">
@@ -637,28 +723,23 @@ function AppShell() {
                           </Select>
                         </div>
                       </div>
-                    )}
-                    {checkoutPrintReceipt && (
-                      <div
-                        className={`mt-2 rounded px-2 py-1 text-sm ${printerConnected ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                          }`}
-                      >
-                        {printerChecking ? "Đang kiểm tra kết nối máy in..." : printerMessage || "Chưa kiểm tra máy in"}
-                      </div>
-                    )}
-                    <div className="mt-4 flex justify-end gap-2">
-                      <button
-                        className="btn-ghost"
-                        onClick={() => setCheckoutModalOpen(false)}
-                      >
-                        Hủy
-                      </button>
-                      <button className="btn-secondary" onClick={() => void confirmCheckout()}>
-                        Xác nhận thanh toán
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                    </>
+                  }
+                  rightContent={
+                    <BillTemplatePreview
+                      title="PHIẾU TẠM TÍNH"
+                      items={karaoke.currentSession.items.map((item) => ({
+                        id: `temp-pv-${item.san_pham_id}`,
+                        name: item.ten_san_pham,
+                        qty: item.so_luong,
+                        amount: item.thanh_tien,
+                      }))}
+                      productTotal={karaoke.currentSession.tong_tien_san_pham}
+                      hourTotal={karaoke.currentSession.tong_tien_gio}
+                      grandTotal={karaoke.currentSession.tong_tien_thanh_toan}
+                    />
+                  }
+                />
               )}
             </>
           }
@@ -755,7 +836,7 @@ function AppShell() {
               onDateChange={setHistoryDate}
               onFilter={() => void karaoke.loadHistory(historyDate)}
               onOpenDetail={(historyId) => karaoke.loadHistoryDetail(historyId)}
-              onReprintBill={async (historyId) => {
+              onReprintBill={async (historyId, selectedQrId) => {
                 const printer = await invoke<{ connected: boolean; message: string }>(
                   "check_printer_connection",
                   { printerAddr: printerTarget || null },
@@ -768,10 +849,15 @@ function AppShell() {
                   printerAddr: printerTarget || null,
                   qr_settings: buildQrSettingsForRealBill({
                     printQrOnReceipt: printBillQr,
-                    selectedQrThanhToanId,
+                    selectedQrThanhToanId: selectedQrId,
                   }),
                 });
               }}
+              qrThanhToanOptions={qrThanhToanList.map((item) => ({
+                qr_thanh_toan_id: item.qr_thanh_toan_id,
+                qr_thanh_toan_ten: item.qr_thanh_toan_ten,
+              }))}
+              defaultSelectedQrThanhToanId={selectedQrThanhToanId}
               onDeleteByIds={async (ids) => {
                 return invoke<number>("delete_history_by_ids", { ids });
               }}

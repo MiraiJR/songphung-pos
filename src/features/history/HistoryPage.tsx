@@ -3,7 +3,10 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Trash2, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
+import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
+import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,7 +28,9 @@ type Props = {
   onDateChange: (v: string) => void;
   onFilter: () => void;
   onOpenDetail: (historyId: number) => Promise<void>;
-  onReprintBill: (historyId: number) => Promise<string>;
+  onReprintBill: (historyId: number, selectedQrThanhToanId: number | null) => Promise<string>;
+  qrThanhToanOptions: Array<{ qr_thanh_toan_id: number; qr_thanh_toan_ten: string }>;
+  defaultSelectedQrThanhToanId: number | null;
   onDeleteByIds: (ids: number[]) => Promise<number>;
   onDeleteByRange: (startDate: string, endDate: string) => Promise<number>;
   onUpdateBill: (
@@ -82,6 +87,8 @@ export function HistoryPage({
   onFilter,
   onOpenDetail,
   onReprintBill,
+  qrThanhToanOptions,
+  defaultSelectedQrThanhToanId,
   onDeleteByIds,
   onDeleteByRange,
   onUpdateBill,
@@ -93,6 +100,9 @@ export function HistoryPage({
   const [selectedHistory, setSelectedHistory] = useState<PaidHistory | null>(null);
   const [reprintStatus, setReprintStatus] = useState<{ type: "ok" | "error"; message: string } | null>(null);
   const [reprintingHistoryId, setReprintingHistoryId] = useState<number | null>(null);
+  const [reprintConfirmOpen, setReprintConfirmOpen] = useState(false);
+  const [reprintTarget, setReprintTarget] = useState<PaidHistory | null>(null);
+  const [reprintSelectedQrId, setReprintSelectedQrId] = useState<number | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [deleteIdsDialogOpen, setDeleteIdsDialogOpen] = useState(false);
@@ -129,6 +139,38 @@ export function HistoryPage({
     setEditPrintAfterSave(false);
     setEditOpen(true);
     setMenuHistoryId(null);
+  }
+
+  async function requestReprint(item: PaidHistory) {
+    setMenuHistoryId(null);
+    setMenuPosition(null);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+    } catch {
+      // keep modal open flow even if detail refresh fails
+    }
+    setReprintTarget(item);
+    setReprintSelectedQrId(defaultSelectedQrThanhToanId);
+    setReprintConfirmOpen(true);
+  }
+
+  async function handleConfirmReprint() {
+    if (!reprintTarget) return;
+    setReprintingHistoryId(reprintTarget.lich_su_phong_id);
+    setReprintStatus(null);
+    try {
+      const message = await onReprintBill(reprintTarget.lich_su_phong_id, reprintSelectedQrId);
+      setReprintStatus({ type: "ok", message });
+      setReprintConfirmOpen(false);
+      setReprintTarget(null);
+    } catch (error) {
+      setReprintStatus({
+        type: "error",
+        message: `In lại hóa đơn thất bại: ${String(error)}`,
+      });
+    } finally {
+      setReprintingHistoryId(null);
+    }
   }
 
   useEffect(() => {
@@ -184,7 +226,10 @@ export function HistoryPage({
       await onOpenDetail(editingHistory.lich_su_phong_id);
       if (editPrintAfterSave) {
         try {
-          const printMessage = await onReprintBill(editingHistory.lich_su_phong_id);
+          const printMessage = await onReprintBill(
+            editingHistory.lich_su_phong_id,
+            defaultSelectedQrThanhToanId,
+          );
           toast.success(printMessage);
         } catch (error) {
           toast.error(`Đã lưu nhưng in hóa đơn thất bại: ${String(error)}`);
@@ -488,28 +533,73 @@ export function HistoryPage({
             <button
               type="button"
               className="w-full rounded px-2 py-1 text-left hover:bg-slate-100"
-              onClick={async () => {
-                setReprintingHistoryId(menuHistoryId);
-                setReprintStatus(null);
-                try {
-                  const message = await onReprintBill(menuHistoryId);
-                  setReprintStatus({ type: "ok", message });
-                } catch (error) {
-                  setReprintStatus({
-                    type: "error",
-                    message: `In lại hóa đơn thất bại: ${String(error)}`,
-                  });
-                }
-                setReprintingHistoryId(null);
-                setMenuHistoryId(null);
-                setMenuPosition(null);
+              onClick={() => {
+                const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
+                if (item) void requestReprint(item);
               }}
             >
-              {reprintingHistoryId === menuHistoryId ? "Đang in..." : "In lại hóa đơn"}
+              In lại hóa đơn
             </button>
           </div>,
           document.body,
         )}
+
+      {/* Reprint confirm modal */}
+      {reprintConfirmOpen && reprintTarget && (
+        <ConfirmBillActionModal
+          open={reprintConfirmOpen}
+          title="Xác nhận in lại hóa đơn"
+          confirmText={reprintingHistoryId === reprintTarget.lich_su_phong_id ? "Đang in..." : "Xác nhận in lại"}
+          busy={reprintingHistoryId === reprintTarget.lich_su_phong_id}
+          onClose={() => {
+            setReprintConfirmOpen(false);
+            setReprintTarget(null);
+          }}
+          onConfirm={() => void handleConfirmReprint()}
+          leftContent={
+            <>
+              <p className="text-sm text-slate-600">
+                Bạn có muốn in lại hóa đơn <span className="font-semibold">#{reprintTarget.lich_su_phong_id}</span> của
+                phòng <span className="font-semibold">{reprintTarget.ten_phong}</span> không?
+              </p>
+              <div className="mt-3">
+                <label className="mb-1 block text-sm text-slate-600">Chọn QR in lại</label>
+                <Select
+                  value={reprintSelectedQrId != null ? String(reprintSelectedQrId) : ""}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    setReprintSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                  }}
+                >
+                  <option value="">-- Chọn QR --</option>
+                  {qrThanhToanOptions.map((item) => (
+                    <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
+                      {item.qr_thanh_toan_ten}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                Tổng tiền: <span className="font-semibold">{Math.round(reprintTarget.tong_tien_thanh_toan).toLocaleString()}</span>
+              </div>
+            </>
+          }
+          rightContent={
+            <BillTemplatePreview
+              title="PHIẾU THANH TOÁN"
+              items={historyItems.map((item) => ({
+                id: `reprint-pv-${item.san_pham_id}`,
+                name: item.ten_san_pham,
+                qty: item.so_luong,
+                amount: item.thanh_tien,
+              }))}
+              productTotal={reprintTarget.tong_tien_san_pham}
+              hourTotal={reprintTarget.tong_tien_gio}
+              grandTotal={reprintTarget.tong_tien_thanh_toan}
+            />
+          }
+        />
+      )}
 
       {/* Detail modal */}
       {detailOpen && selectedHistory && (
