@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
@@ -103,6 +104,7 @@ export function HistoryPage({
   const [reprintConfirmOpen, setReprintConfirmOpen] = useState(false);
   const [reprintTarget, setReprintTarget] = useState<PaidHistory | null>(null);
   const [reprintSelectedQrId, setReprintSelectedQrId] = useState<number | null>(null);
+  const [reprintQrPreviewUrl, setReprintQrPreviewUrl] = useState("");
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [deleteIdsDialogOpen, setDeleteIdsDialogOpen] = useState(false);
@@ -172,6 +174,23 @@ export function HistoryPage({
       setReprintingHistoryId(null);
     }
   }
+
+  useEffect(() => {
+    if (!reprintConfirmOpen || reprintSelectedQrId == null) {
+      setReprintQrPreviewUrl("");
+      return;
+    }
+    void (async () => {
+      try {
+        const url = await invoke<string>("get_qr_thanh_toan_preview_data_url", {
+          qrThanhToanId: reprintSelectedQrId,
+        });
+        setReprintQrPreviewUrl(url);
+      } catch {
+        setReprintQrPreviewUrl("");
+      }
+    })();
+  }, [reprintConfirmOpen, reprintSelectedQrId]);
 
   useEffect(() => {
     if (!editOpen || !editingHistory) return;
@@ -587,15 +606,21 @@ export function HistoryPage({
           rightContent={
             <BillTemplatePreview
               title="PHIẾU THANH TOÁN"
+              roomName={reprintTarget.ten_phong}
+              startedAt={formatDateTime(reprintTarget.gio_bat_dau)}
+              endedAt={formatDateTime(reprintTarget.gio_ket_thuc)}
+              billNumber={reprintTarget.lich_su_phong_id}
               items={historyItems.map((item) => ({
                 id: `reprint-pv-${item.san_pham_id}`,
                 name: item.ten_san_pham,
                 qty: item.so_luong,
+                unitPrice: item.don_gia,
                 amount: item.thanh_tien,
               }))}
               productTotal={reprintTarget.tong_tien_san_pham}
               hourTotal={reprintTarget.tong_tien_gio}
               grandTotal={reprintTarget.tong_tien_thanh_toan}
+              qrDataUrl={reprintQrPreviewUrl}
             />
           }
         />

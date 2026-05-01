@@ -93,6 +93,9 @@ function AppShell() {
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
   const [temporaryBillModalOpen, setTemporaryBillModalOpen] = useState(false);
   const [temporaryBillNow, setTemporaryBillNow] = useState("");
+  const [temporaryBillSelectedQrId, setTemporaryBillSelectedQrId] = useState<number | null>(null);
+  const [checkoutQrPreviewUrl, setCheckoutQrPreviewUrl] = useState("");
+  const [temporaryBillQrPreviewUrl, setTemporaryBillQrPreviewUrl] = useState("");
   const [checkoutAmount, setCheckoutAmount] = useState("0");
   const [checkoutHourAmount, setCheckoutHourAmount] = useState("0");
   const [checkoutPrintReceipt, setCheckoutPrintReceipt] = useState(true);
@@ -194,6 +197,37 @@ function AppShell() {
     }
   }
 
+  async function loadQrPreviewDataUrlById(qrId: number | null): Promise<string> {
+    if (qrId == null) return "";
+    try {
+      return await invoke<string>("get_qr_thanh_toan_preview_data_url", { qrThanhToanId: qrId });
+    } catch {
+      return "";
+    }
+  }
+
+  useEffect(() => {
+    if (!checkoutModalOpen || !printBillQr) {
+      setCheckoutQrPreviewUrl("");
+      return;
+    }
+    void (async () => {
+      const url = await loadQrPreviewDataUrlById(selectedQrThanhToanId);
+      setCheckoutQrPreviewUrl(url);
+    })();
+  }, [checkoutModalOpen, printBillQr, selectedQrThanhToanId]);
+
+  useEffect(() => {
+    if (!temporaryBillModalOpen || !printBillQr) {
+      setTemporaryBillQrPreviewUrl("");
+      return;
+    }
+    void (async () => {
+      const url = await loadQrPreviewDataUrlById(temporaryBillSelectedQrId);
+      setTemporaryBillQrPreviewUrl(url);
+    })();
+  }, [temporaryBillModalOpen, printBillQr, temporaryBillSelectedQrId]);
+
   async function handleStartRoom(roomId: number) {
     await invoke("start_room", { roomId });
     await karaoke.loadMasterData();
@@ -221,6 +255,7 @@ function AppShell() {
       return;
     }
     setTemporaryBillNow(formatLocalDateTimeForBill(new Date()));
+    setTemporaryBillSelectedQrId(selectedQrThanhToanId);
     setTemporaryBillModalOpen(true);
   }
 
@@ -252,7 +287,7 @@ function AppShell() {
         printer_name_or_ip: printerTarget.trim() ? printerTarget.trim() : null,
         qr_settings: buildQrSettingsForRealBill({
           printQrOnReceipt: printBillQr,
-          selectedQrThanhToanId,
+          selectedQrThanhToanId: temporaryBillSelectedQrId,
         }),
       });
       setTemporaryBillModalOpen(false);
@@ -662,15 +697,21 @@ function AppShell() {
                   rightContent={
                     <BillTemplatePreview
                       title="PHIẾU THANH TOÁN"
+                      roomName={karaoke.currentSession.ten_phong}
+                      startedAt={karaoke.currentSession.gio_bat_dau}
+                      endedAt={formatLocalDateTimeForBill(new Date())}
+                      billNumber={karaoke.currentSession.lich_su_phong_id}
                       items={karaoke.currentSession.items.map((item) => ({
                         id: `checkout-pv-${item.san_pham_id}`,
                         name: item.ten_san_pham,
                         qty: item.so_luong,
+                        unitPrice: item.don_gia,
                         amount: item.thanh_tien,
                       }))}
                       productTotal={karaoke.currentSession.tong_tien_san_pham}
                       hourTotal={Math.max(0, parseAmountInput(checkoutHourAmount) || 0)}
                       grandTotal={Math.max(0, parseAmountInput(checkoutAmount) || 0)}
+                      qrDataUrl={printBillQr ? checkoutQrPreviewUrl : ""}
                     />
                   }
                 />
@@ -708,10 +749,12 @@ function AppShell() {
                         <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
                           <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
                           <Select
-                            value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
+                            value={temporaryBillSelectedQrId != null ? String(temporaryBillSelectedQrId) : ""}
                             onChange={(e) => {
                               const id = Number(e.target.value);
-                              persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                              const nextId = Number.isFinite(id) && id > 0 ? id : null;
+                              setTemporaryBillSelectedQrId(nextId);
+                              persistSelectedQrId(nextId);
                             }}
                           >
                             <option value="">-- Chọn QR --</option>
@@ -728,15 +771,21 @@ function AppShell() {
                   rightContent={
                     <BillTemplatePreview
                       title="PHIẾU TẠM TÍNH"
+                      roomName={karaoke.currentSession.ten_phong}
+                      startedAt={karaoke.currentSession.gio_bat_dau}
+                      endedAt={temporaryBillNow}
+                      billNumber={karaoke.currentSession.lich_su_phong_id}
                       items={karaoke.currentSession.items.map((item) => ({
                         id: `temp-pv-${item.san_pham_id}`,
                         name: item.ten_san_pham,
                         qty: item.so_luong,
+                        unitPrice: item.don_gia,
                         amount: item.thanh_tien,
                       }))}
                       productTotal={karaoke.currentSession.tong_tien_san_pham}
                       hourTotal={karaoke.currentSession.tong_tien_gio}
                       grandTotal={karaoke.currentSession.tong_tien_thanh_toan}
+                      qrDataUrl={printBillQr ? temporaryBillQrPreviewUrl : ""}
                     />
                   }
                 />
