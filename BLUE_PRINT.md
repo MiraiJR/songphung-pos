@@ -191,8 +191,8 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     * **In lại từ lịch sử:** `reprint_history_bill` → `compose_receipt_bill` → cùng `print_receipt_to_target`.
     * **In thử (Cài đặt):** `test_printer` → mẫu `compose_printer_test_sample_receipt` (có marker) + QR hiện tại.
 * **Kỹ thuật in ảnh:**
-    * **Mạng / macOS / Linux (raw):** Chuyển PNG sang raster **ESC/POS `GS v 0`** (module `printer/escpos_qr.rs`), rộng tối đa ~384 dot, căn giữa (`ESC a`).
-    * **Windows (PrintDocument):** `printer/windows_unicode_print.ps1` nhận `-QrImagePath`; khi gặp dòng đúng bằng `@@BILL_QR@@`, vẽ ảnh PNG căn giữa trang thay vì in chữ.
+    * **Mạng / macOS / Linux (raw):** Chuyển PNG sang raster **ESC/POS `GS v 0`** (`escpos_qr.rs`): QR được scale **~40%** chiều ngang khổ K80 (~384 dot), đặt **giữa** bằng nền trắng hai bên trong một bitmap đủ rộng (không phụ thuộc `ESC a` cho bitmap).
+    * **Windows (PrintDocument):** `windows_unicode_print.ps1` nhận `-QrImagePath`; khi gặp `@@BILL_QR@@`, vẽ PNG **~40%** chiều ngang khổ giấy và **căn giữa**.
 
 ### Feature 6, 7 & 8: CRUD Quản trị (Phòng, Sản phẩm & Nhóm sản phẩm)
 * **UI:** Nằm ở các View riêng (Routing: `/admin/rooms`, `/admin/products`, `/admin/categories`).

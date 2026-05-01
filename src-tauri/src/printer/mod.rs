@@ -11,7 +11,10 @@ use unicode_normalization::UnicodeNormalization;
 /// Single line in composed receipt text; replaced by QR bitmap when printing.
 pub const BILL_QR_MARKER_LINE: &str = "@@BILL_QR@@";
 
-const QR_PRINT_WIDTH_DOTS: u32 = 384;
+/// Printable width for K80 @ ~203dpi (dots per line). QR uses a fraction of this, centered on the raster.
+const RECEIPT_PAPER_WIDTH_DOTS: u32 = 384;
+/// QR module width as % of paper width (centered on full-width raster).
+const QR_BILL_WIDTH_PERCENT: u32 = 40;
 
 #[cfg(target_os = "windows")]
 const WINDOWS_UNICODE_PRINT_PS1: &str = include_str!("windows_unicode_print.ps1");
@@ -267,12 +270,12 @@ fn receipt_print_bytes(content: &str, qr_png: Option<&[u8]>) -> Result<Vec<u8>, 
         2 => {
             buf.extend_from_slice(&encode_vietnamese_cp1258(segments[0]));
             if let Some(png) = qr_png {
-                buf.extend_from_slice(&[0x1B, 0x61, 0x01]); // center
+                // QR is centered inside a full-width raster (see escpos_qr); avoid ESC a (printer-dependent for bitmaps).
                 buf.extend_from_slice(&escpos_qr::png_to_esc_pos_gs_v0(
                     png,
-                    QR_PRINT_WIDTH_DOTS,
+                    RECEIPT_PAPER_WIDTH_DOTS,
+                    QR_BILL_WIDTH_PERCENT,
                 )?);
-                buf.extend_from_slice(&[0x1B, 0x61, 0x00]); // left
                 buf.push(0x0A);
             }
             buf.extend_from_slice(&encode_vietnamese_cp1258(segments[1]));

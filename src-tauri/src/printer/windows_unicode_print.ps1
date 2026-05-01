@@ -55,7 +55,9 @@ $handler = [System.Drawing.Printing.PrintPageEventHandler]{
                 if ($QrImagePath -and (Test-Path -LiteralPath $QrImagePath)) {
                     $img = [System.Drawing.Image]::FromFile($QrImagePath)
                     try {
-                        $maxW = [Math]::Max(50, $e.PageBounds.Width - 24)
+                        # ~40% of printable width, centered (matches ESC/POS padded raster).
+                        $targetFrac = 0.40
+                        $maxW = [int][Math]::Max(80, [Math]::Floor($e.PageBounds.Width * $targetFrac))
                         $tw = [Math]::Min($img.Width, $maxW)
                         $scale = $tw / $img.Width
                         $th = [int][Math]::Ceiling($img.Height * $scale)

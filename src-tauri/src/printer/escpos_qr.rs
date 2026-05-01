@@ -1,7 +1,13 @@
 use image::GrayImage;
+use image::Luma;
+use image::imageops;
 
-/// ESC/POS raster (GS v 0), suitable for 80mm printers (width capped).
-pub fn png_to_esc_pos_gs_v0(png_bytes: &[u8], max_width_dots: u32) -> Result<Vec<u8>, String> {
+/// ESC/POS raster (GS v 0): QR scaled to `qr_width_percent` of paper width, centered on full-width row.
+pub fn png_to_esc_pos_gs_v0(
+    png_bytes: &[u8],
+    paper_width_dots: u32,
+    qr_width_percent: u32,
+) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(png_bytes)
         .map_err(|e| format!("Không đọc được ảnh QR: {e}"))?;
     let gray = img.to_luma8();
@@ -9,9 +15,12 @@ pub fn png_to_esc_pos_gs_v0(png_bytes: &[u8], max_width_dots: u32) -> Result<Vec
     if gw == 0 || gh == 0 {
         return Err("Ảnh QR không hợp lệ.".to_string());
     }
-    let target_w = max_width_dots.min(gw).max(1);
-    let scale = target_w as f32 / gw as f32;
-    let tw = ((gw as f32 * scale).round() as u32).max(1).min(max_width_dots);
+
+    let paper_w = paper_width_dots.max(8);
+    let qr_cap = ((paper_w * qr_width_percent.min(100)) / 100).max(48).min(paper_w);
+
+    let scale = qr_cap as f32 / gw as f32;
+    let tw = ((gw as f32 * scale).round() as u32).max(1).min(qr_cap);
     let th = ((gh as f32 * scale).round() as u32).max(1);
 
     let resized = if tw != gw || th != gh {
@@ -20,7 +29,18 @@ pub fn png_to_esc_pos_gs_v0(png_bytes: &[u8], max_width_dots: u32) -> Result<Vec
         gray
     };
 
-    raster_gs_v0(&resized)
+    let canvas_w = paper_w.next_multiple_of(8);
+    let qh = resized.height();
+    let qw = resized.width();
+    let off_x = (canvas_w.saturating_sub(qw)) / 2;
+
+    let mut canvas = GrayImage::new(canvas_w, qh);
+    for p in canvas.pixels_mut() {
+        *p = Luma([255]);
+    }
+    imageops::overlay(&mut canvas, &resized, off_x as i64, 0);
+
+    raster_gs_v0(&canvas)
 }
 
 fn raster_gs_v0(gray: &GrayImage) -> Result<Vec<u8>, String> {

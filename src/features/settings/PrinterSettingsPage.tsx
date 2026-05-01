@@ -178,7 +178,7 @@ export function PrinterSettingsPage({ printerTarget, onChangePrinterTarget }: Pr
                 <img
                   src={billQrDataUrl}
                   alt="Mã QR thanh toán"
-                  className="mx-auto max-h-48 w-auto max-w-full object-contain"
+                  className="mx-auto max-h-48 w-auto max-w-[40%] object-contain"
                 />
               </div>
             ) : (
