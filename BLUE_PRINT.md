@@ -226,6 +226,12 @@ Màn hình chính (POS) sử dụng Flexbox hoặc CSS Grid chia làm 3 phần:
     * Nếu **không kết nối**: hiển thị lỗi trên UI và không thực hiện in.
     * Nếu **đã kết nối**: gọi IPC in lại bill: `invoke('reprint_history_bill', { historyId, printerAddr })` (địa chỉ máy in lấy từ `localStorage` như các luồng in khác).
     * Backend render lại nội dung hóa đơn từ `lich_su_phong` + `lich_su_phong_san_pham` (**cùng template và marker QR** như lúc thanh toán), ghép ảnh QR hiện tại (`qr_png_for_print`), rồi in (raw ESC/POS hoặc Windows như Feature 5/5b).
+* **Chỉnh sửa hóa đơn đã thanh toán (trong menu Tùy chọn):**
+    * Mở modal chỉnh sửa cho phép cập nhật: `tiền giờ`, `tổng tiền`, `số lượng món`.
+    * Có checkbox **[In hóa đơn sau khi lưu chỉnh sửa]**:
+        * Nếu tick: **lưu trước**, sau đó gọi luồng in lại hóa đơn (`reprint_history_bill`).
+        * Nếu không tick: chỉ lưu chỉnh sửa.
+    * Khi lưu: Backend cập nhật `lich_su_phong_san_pham.so_luong`, tính lại `tong_tien_san_pham` và lưu `tong_tien_gio` / `tong_tien_thanh_toan` theo dữ liệu chỉnh sửa.
 
 ### Feature 11: Kiểm tra & Cài đặt Máy in (Printer Setup & Test)
 * **UI:** View **`/admin/settings`** (menu **Cài đặt**). Component: `src/features/settings/PrinterSettingsPage.tsx`.

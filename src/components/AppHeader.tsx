@@ -5,7 +5,7 @@ export function AppHeader() {
     { label: "POS", to: "/" },
     { label: "Phòng", to: "/admin/rooms" },
     { label: "Sản phẩm", to: "/admin/products" },
-    { label: "Nhóm SP", to: "/admin/categories" },
+    { label: "Nhóm Sản phẩm", to: "/admin/categories" },
     { label: "Lịch sử", to: "/admin/history" },
     { label: "Cài đặt", to: "/admin/settings" },
   ];
@@ -20,10 +20,9 @@ export function AppHeader() {
           <NavLink
             key={item.to}
             className={({ isActive }) =>
-              `rounded-md px-3 py-1.5 text-sm transition ${
-                isActive
-                  ? "bg-primary text-white shadow-sm"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              `rounded-md px-3 py-1.5 text-sm transition ${isActive
+                ? "bg-primary text-white shadow-sm"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`
             }
             to={item.to}

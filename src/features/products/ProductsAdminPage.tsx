@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Download, Plus, Search, Upload } from "lucide-react";
+import { Download, Plus, Search, Upload, X } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import {
   AlertDialog,
@@ -48,7 +48,7 @@ function dialogPath(selected: string | string[] | null): string | null {
 
 export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDelete, onReloadMaster }: Props) {
   const form = useForm<FormData>({
-    defaultValues: { don_vi_tinh: "phan", don_gia: 10000 },
+    defaultValues: { don_vi_tinh: "", don_gia: 0 },
   });
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -61,6 +61,7 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
+  const [createDonGiaInput, setCreateDonGiaInput] = useState("");
 
   const filteredProducts = products.filter((product) => {
     const byName = product.ten_san_pham.toLowerCase().includes(searchKeyword.toLowerCase());
@@ -244,35 +245,50 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       </div>
       {createModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[560px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[560px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setCreateModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Thêm sản phẩm</h3>
             <form
               className="grid grid-cols-2 gap-2"
               onSubmit={form.handleSubmit(async (data) => {
                 if (!data.san_pham_id || !data.ten_san_pham || !data.don_vi_tinh || data.don_gia <= 0) return;
                 await onCreate(data);
-                form.reset({ don_vi_tinh: "phan", don_gia: 10000 });
+                form.reset({ san_pham_id: "", ten_san_pham: "", don_vi_tinh: "", don_gia: 0, nhom_san_pham_id: "" });
+                setCreateDonGiaInput("");
                 setCreateModalOpen(false);
               })}
             >
               <div>
                 <label className="mb-1 block text-sm text-slate-600">Mã</label>
-                <input className="app-input w-full" {...form.register("san_pham_id")} />
+                <input className="app-input w-full" placeholder="VD: BIA01" {...form.register("san_pham_id")} />
               </div>
               <div>
                 <label className="mb-1 block text-sm text-slate-600">Tên</label>
-                <input className="app-input w-full" {...form.register("ten_san_pham")} />
+                <input className="app-input w-full" placeholder="Tên sản phẩm" {...form.register("ten_san_pham")} />
               </div>
               <div>
                 <label className="mb-1 block text-sm text-slate-600">Đơn vị</label>
-                <input className="app-input w-full" {...form.register("don_vi_tinh")} />
+                <input className="app-input w-full" placeholder="VD: lon, chai, phần" {...form.register("don_vi_tinh")} />
               </div>
               <div>
                 <label className="mb-1 block text-sm text-slate-600">Đơn giá</label>
                 <input
                   className="app-input w-full"
-                  type="number"
-                  {...form.register("don_gia", { valueAsNumber: true })}
+                  placeholder="VD: 10,000"
+                  inputMode="numeric"
+                  value={createDonGiaInput}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, "");
+                    setCreateDonGiaInput(digits ? Number(digits).toLocaleString("en-US") : "");
+                    form.setValue("don_gia", digits ? Number(digits) : 0, { shouldValidate: true });
+                  }}
                 />
               </div>
               <div className="col-span-2">
@@ -304,7 +320,15 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       )}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setEditingProduct(null)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Sửa sản phẩm</h3>
             <div className="grid grid-cols-2 gap-2">
               <div>

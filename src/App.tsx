@@ -596,6 +596,19 @@ function AppShell() {
               onDeleteByRange={async (startDate, endDate) => {
                 return invoke<number>("delete_history_by_range", { startDate, endDate });
               }}
+              onUpdateBill={async (historyId, tongTienGio, tongTienThanhToan, items) => {
+                return invoke<string>("update_paid_history_bill", {
+                  payload: {
+                    history_id: historyId,
+                    tong_tien_gio: tongTienGio,
+                    tong_tien_thanh_toan: tongTienThanhToan,
+                    items: items.map((item) => ({
+                      san_pham_id: item.san_pham_id,
+                      so_luong: item.so_luong,
+                    })),
+                  },
+                });
+              }}
               onReloadHistory={() => karaoke.loadHistory(historyDate)}
             />
           }

@@ -159,6 +159,20 @@ pub struct TemporaryBillData {
     pub tong_tam_tinh: f64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateHistoryOrderItemQtyPayload {
+    pub san_pham_id: String,
+    pub so_luong: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePaidHistoryBillPayload {
+    pub history_id: i64,
+    pub tong_tien_gio: f64,
+    pub tong_tien_thanh_toan: f64,
+    pub items: Vec<UpdateHistoryOrderItemQtyPayload>,
+}
+
 fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, String> {
     if let Some(target) = printer_name_or_ip {
         let trimmed = target.trim();
@@ -328,6 +342,10 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         "Kết thúc: {}",
         format_datetime_receipt(&data.gio_hien_tai)
     )));
+    content.push_str(&rf::line_two_cols(
+        "Nhân viên: Admin",
+        &format!("Số HĐ: {:05}", data.lich_su_phong_id),
+    ));
     content.push_str(&rf::line_sep());
     content.push_str(&rf::line_item_header());
     for item in &data.items {
@@ -348,7 +366,7 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         &format_currency(data.tong_tien_gio),
     ));
     content.push_str(&rf::line_total(
-        "TỔNG TẠM TÍNH:",
+        "TIỀN MẶT (đ):",
         &format_currency(data.tong_tam_tinh),
     ));
     content.push_str(&rf::line_sep());
@@ -1133,6 +1151,102 @@ pub async fn get_history_order_items(
     .fetch_all(state.pool())
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_paid_history_bill(
+    state: tauri::State<'_, DbState>,
+    payload: UpdatePaidHistoryBillPayload,
+) -> Result<String, String> {
+    if payload.tong_tien_gio < 0.0 {
+        return Err("Tiền giờ không được nhỏ hơn 0.".to_string());
+    }
+    if payload.tong_tien_thanh_toan < 0.0 {
+        return Err("Tổng tiền không được nhỏ hơn 0.".to_string());
+    }
+    if payload.items.iter().any(|item| item.so_luong < 0) {
+        return Err("Số lượng sản phẩm không được nhỏ hơn 0.".to_string());
+    }
+
+    let pool = state.pool();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let exists: Option<i64> = sqlx::query_scalar(
+        "SELECT lich_su_phong_id
+         FROM lich_su_phong
+         WHERE lich_su_phong_id = ? AND trang_thai = 'DA_THANH_TOAN'",
+    )
+    .bind(payload.history_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if exists.is_none() {
+        return Err("Chỉ cho phép chỉnh sửa hóa đơn đã thanh toán.".to_string());
+    }
+
+    for item in &payload.items {
+        if item.so_luong == 0 {
+            sqlx::query(
+                "DELETE FROM lich_su_phong_san_pham
+                 WHERE lich_su_phong_id = ? AND san_pham_id = ?",
+            )
+            .bind(payload.history_id)
+            .bind(&item.san_pham_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        } else {
+            let result = sqlx::query(
+                "UPDATE lich_su_phong_san_pham
+                 SET so_luong = ?
+                 WHERE lich_su_phong_id = ? AND san_pham_id = ?",
+            )
+            .bind(item.so_luong)
+            .bind(payload.history_id)
+            .bind(&item.san_pham_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+
+            if result.rows_affected() == 0 {
+                return Err(format!(
+                    "Không tìm thấy sản phẩm {} trong hóa đơn để chỉnh sửa.",
+                    item.san_pham_id
+                ));
+            }
+        }
+    }
+
+    let tong_tien_san_pham: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(so_luong * don_gia), 0)
+         FROM lich_su_phong_san_pham
+         WHERE lich_su_phong_id = ?",
+    )
+    .bind(payload.history_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let tong_tien_thanh_toan = payload.tong_tien_thanh_toan;
+
+    sqlx::query(
+        "UPDATE lich_su_phong
+         SET tong_tien_san_pham = ?,
+             tong_tien_gio = ?,
+             tong_tien_thanh_toan = ?
+         WHERE lich_su_phong_id = ? AND trang_thai = 'DA_THANH_TOAN'",
+    )
+    .bind(tong_tien_san_pham)
+    .bind(payload.tong_tien_gio)
+    .bind(tong_tien_thanh_toan)
+    .bind(payload.history_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(format!("Đã cập nhật hóa đơn #{}", payload.history_id))
 }
 
 #[tauri::command]

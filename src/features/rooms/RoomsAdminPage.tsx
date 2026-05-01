@@ -1,6 +1,6 @@
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import type { Room } from "@/types/karaoke";
 
@@ -45,7 +45,7 @@ function formatAmountDigits(digits: string): string {
 
 export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
   const form = useForm<FormData>({
-    defaultValues: { ten_phong: "", tien_gio: 180000 },
+    defaultValues: { ten_phong: "", tien_gio: 0 },
   });
   const editForm = useForm<EditFormData>({
     defaultValues: { phong_id: 0, ten_phong: "", tien_gio: 180000, loai_phong: "THUONG" },
@@ -54,12 +54,14 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [confirmDeleteRoom, setConfirmDeleteRoom] = useState<Room | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [createTienGioInput, setCreateTienGioInput] = useState("");
   const [editTienGioInput, setEditTienGioInput] = useState("180,000");
 
   const submit = form.handleSubmit(async (data) => {
     if (!data.ten_phong || data.tien_gio <= 0) return;
     await onCreate(data);
-    form.reset({ ten_phong: "", tien_gio: 180000 });
+    form.reset({ ten_phong: "", tien_gio: 0 });
+    setCreateTienGioInput("");
     setCreateModalOpen(false);
   });
 
@@ -190,19 +192,32 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
       </div>
       {createModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setCreateModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Thêm phòng</h3>
             <form className="space-y-2" onSubmit={submit}>
               <input
                 className="app-input w-full"
-                placeholder="Tên phòng"
+                placeholder="Tên phòng (VD: P1 hoặc VIP-P1)"
                 {...form.register("ten_phong")}
               />
               <input
                 className="app-input w-full"
-                type="number"
-                placeholder="Tiền giờ"
-                {...form.register("tien_gio", { valueAsNumber: true })}
+                placeholder="Đơn giá giờ (VD: 180,000)"
+                inputMode="numeric"
+                value={createTienGioInput}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, "");
+                  setCreateTienGioInput(formatAmountDigits(digits));
+                  form.setValue("tien_gio", digits ? Number(digits) : 0, { shouldValidate: true });
+                }}
               />
               <div className="mt-3 flex justify-end gap-2">
                 <button
@@ -222,7 +237,15 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
       )}
       {editModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setEditModalOpen(false)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="mb-3 text-lg font-semibold">Sửa thông tin phòng</h3>
             <form className="space-y-2" onSubmit={submitEdit}>
               <input
@@ -265,7 +288,15 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
       )}
       {confirmDeleteRoom && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+          <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => setConfirmDeleteRoom(null)}
+              aria-label="Đóng"
+            >
+              <X size={18} />
+            </button>
             <h3 className="text-lg font-semibold text-slate-800">Xác nhận xóa phòng</h3>
             <p className="mt-2 text-sm text-slate-600">
               Bạn có chắc muốn xóa phòng <span className="font-semibold">{confirmDeleteRoom.ten_phong}</span> không?

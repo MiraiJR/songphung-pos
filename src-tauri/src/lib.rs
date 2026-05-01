@@ -50,6 +50,7 @@ pub fn run() {
             commands::get_current_session,
             commands::list_paid_history,
             commands::get_history_order_items,
+            commands::update_paid_history_bill,
             commands::delete_history_by_ids,
             commands::delete_history_by_range,
             csv_import::export_csv_templates,

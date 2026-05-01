@@ -81,6 +81,9 @@ export function PosPage(props: Props) {
   const totalMinutesPart = totalMinutes % 60;
   const totalDurationLabel =
     totalHoursPart <= 0 ? `${totalMinutesPart} phút` : `${totalHoursPart} giờ ${totalMinutesPart} phút`;
+  const tongTienMonDisplay = Math.max(0, Math.ceil(currentSession?.tong_tien_san_pham ?? 0));
+  const tongTienGioDisplay = Math.max(0, Math.ceil(currentSession?.tong_tien_gio ?? 0));
+  const tongCongDisplay = Math.max(0, Math.ceil(currentSession?.tong_tien_thanh_toan ?? 0));
 
   const emptyRoomsForTransfer = useMemo(
     () => rooms.filter((r) => r.trang_thai === "TRONG" && r.phong_id !== selectedRoomId),
@@ -164,20 +167,20 @@ export function PosPage(props: Props) {
               <div className="flex items-center justify-between">
                 <span>Tiền món</span>
                 <span className="font-semibold text-slate-800">
-                  {Math.ceil(currentSession?.tong_tien_san_pham ?? 0).toLocaleString()}
+                  {tongTienMonDisplay.toLocaleString()}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Tiền giờ</span>
                 <span className="font-semibold text-slate-800">
-                  {Math.ceil(currentSession?.tong_tien_gio ?? 0).toLocaleString()}
+                  {tongTienGioDisplay.toLocaleString()}
                 </span>
               </div>
             </div>
             <div className="text-xl font-bold text-slate-800">
               Tổng cộng{" "}
               <span className="float-right text-4xl text-primary">
-                {Math.ceil(currentSession?.tong_tien_thanh_toan ?? 0).toLocaleString()}
+                {tongCongDisplay.toLocaleString()}
               </span>
             </div>
             {currentSession ? (
