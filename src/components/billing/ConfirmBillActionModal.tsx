@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 type Props = {
   open: boolean;
@@ -49,8 +49,19 @@ export function ConfirmBillActionModal({
           <button className="btn-ghost" disabled={busy} onClick={onClose}>
             {cancelText}
           </button>
-          <button className="btn-secondary" disabled={busy} onClick={onConfirm}>
-            {busy ? "Đang xử lý..." : confirmText}
+          <button
+            className="btn-secondary inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Đang xử lý...
+              </>
+            ) : (
+              confirmText
+            )}
           </button>
         </div>
       </div>

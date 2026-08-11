@@ -222,6 +222,19 @@ pub struct UpdateQrThanhToanPayload {
     pub qr_code: String,
 }
 
+fn sqlite_f64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<f64, String> {
+    if let Ok(value) = row.try_get::<f64, _>(column) {
+        return Ok(value);
+    }
+    if let Ok(value) = row.try_get::<i64, _>(column) {
+        return Ok(value as f64);
+    }
+    if let Ok(value) = row.try_get::<i32, _>(column) {
+        return Ok(value as f64);
+    }
+    Err(format!("Không đọc được số từ cột {column}"))
+}
+
 fn resolve_printer_target(printer_name_or_ip: Option<String>) -> Result<String, String> {
     if let Some(target) = printer_name_or_ip {
         let trimmed = target.trim();
@@ -718,7 +731,7 @@ pub async fn seed_demo_data(state: tauri::State<'_, DbState>) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn list_rooms(state: tauri::State<'_, DbState>) -> Result<Vec<Room>, String> {
-    sqlx::query_as::<_, Room>("SELECT phong_id, ten_phong, tien_gio, trang_thai FROM phong ORDER BY phong_id")
+    sqlx::query_as::<_, Room>("SELECT phong_id, ten_phong, CAST(tien_gio AS REAL) AS tien_gio, trang_thai FROM phong ORDER BY phong_id")
         .fetch_all(state.pool())
         .await
         .map_err(|e| e.to_string())
@@ -845,7 +858,7 @@ pub async fn delete_product_group(
 #[tauri::command]
 pub async fn list_products(state: tauri::State<'_, DbState>) -> Result<Vec<Product>, String> {
     sqlx::query_as::<_, Product>(
-        "SELECT san_pham_id, nhom_san_pham_id, ten_san_pham, don_vi_tinh, don_gia FROM san_pham ORDER BY ten_san_pham",
+        "SELECT san_pham_id, nhom_san_pham_id, ten_san_pham, don_vi_tinh, CAST(don_gia AS REAL) AS don_gia FROM san_pham ORDER BY ten_san_pham",
     )
     .fetch_all(state.pool())
     .await
@@ -910,7 +923,7 @@ pub async fn start_room(state: tauri::State<'_, DbState>, room_id: i64) -> Resul
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-    let tien_gio: f64 = room.try_get("tien_gio").map_err(|e| e.to_string())?;
+    let tien_gio = sqlite_f64(&room, "tien_gio")?;
     let status: String = room.try_get("trang_thai").map_err(|e| e.to_string())?;
     if status != "TRONG" {
         return Err("Phòng đang hoạt động".to_string());
@@ -985,7 +998,7 @@ pub async fn transfer_room(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Không tìm thấy phòng đích".to_string())?;
-    let target_tien_gio: f64 = tgt.try_get("tien_gio").map_err(|e| e.to_string())?;
+    let target_tien_gio = sqlite_f64(&tgt, "tien_gio")?;
     let tgt_status: String = tgt.try_get("trang_thai").map_err(|e| e.to_string())?;
     if tgt_status != "TRONG" {
         return Err("Phòng đích không trống".to_string());
@@ -1152,7 +1165,7 @@ pub async fn checkout_room(
     .await
     .map_err(|e| e.to_string())?;
     let total_minutes: i64 = row.try_get("total_minutes").map_err(|e| e.to_string())?;
-    let tien_gio: f64 = row.try_get("tien_gio").map_err(|e| e.to_string())?;
+    let tien_gio = sqlite_f64(&row, "tien_gio")?;
     let tong_tien_gio_auto = ((total_minutes as f64 * tien_gio) / 60.0).ceil();
     let tong_tien_gio = payload.hour_amount.unwrap_or(tong_tien_gio_auto);
     if tong_tien_gio < 0.0 {
@@ -1160,7 +1173,7 @@ pub async fn checkout_room(
     }
 
     let tong_tien_san_pham: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(so_luong * don_gia), 0) FROM lich_su_phong_san_pham WHERE lich_su_phong_id = ?",
+        "SELECT CAST(COALESCE(SUM(so_luong * don_gia), 0) AS REAL) FROM lich_su_phong_san_pham WHERE lich_su_phong_id = ?",
     )
     .bind(payload.history_id)
     .fetch_one(&mut *tx)
@@ -1202,7 +1215,9 @@ pub async fn checkout_room(
     .map_err(|e| e.to_string())?;
 
     let checkout_items = sqlx::query_as::<_, HistoryOrderItem>(
-        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong, ct.don_gia, (ct.so_luong * ct.don_gia) AS thanh_tien
+        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong,
+                CAST(ct.don_gia AS REAL) AS don_gia,
+                CAST(ct.so_luong * ct.don_gia AS REAL) AS thanh_tien
          FROM lich_su_phong_san_pham ct
          JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
          WHERE ct.lich_su_phong_id = ?
@@ -1285,7 +1300,8 @@ pub async fn get_current_session(
     let history_id: i64 = row.try_get("lich_su_phong_id").map_err(|e| e.to_string())?;
     let items = sqlx::query_as::<_, OrderItem>(
         "SELECT ct.lich_su_phong_san_pham_id, ct.lich_su_phong_id, ct.san_pham_id, sp.ten_san_pham,
-                ct.so_luong, ct.don_gia, (ct.so_luong * ct.don_gia) AS thanh_tien
+                ct.so_luong, CAST(ct.don_gia AS REAL) AS don_gia,
+                CAST(ct.so_luong * ct.don_gia AS REAL) AS thanh_tien
          FROM lich_su_phong_san_pham ct
          JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
          WHERE ct.lich_su_phong_id = ?
@@ -1305,7 +1321,7 @@ pub async fn get_current_session(
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
-    let tien_gio: f64 = row.try_get("tien_gio").map_err(|e| e.to_string())?;
+    let tien_gio = sqlite_f64(&row, "tien_gio")?;
     let tong_tien_gio = ((minutes as f64 * tien_gio) / 60.0).ceil();
 
     Ok(Some(CurrentSession {
@@ -1331,7 +1347,9 @@ pub async fn list_paid_history(
     if let Some(day) = date {
         sqlx::query_as::<_, PaidHistory>(
             "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
-                    lsp.tong_tien_san_pham, lsp.tong_tien_gio, lsp.tong_tien_thanh_toan
+                    CAST(lsp.tong_tien_san_pham AS REAL) AS tong_tien_san_pham,
+                    CAST(lsp.tong_tien_gio AS REAL) AS tong_tien_gio,
+                    CAST(lsp.tong_tien_thanh_toan AS REAL) AS tong_tien_thanh_toan
              FROM lich_su_phong lsp
              JOIN phong p ON p.phong_id = lsp.phong_id
              WHERE lsp.trang_thai = 'DA_THANH_TOAN' AND date(lsp.gio_ket_thuc) = date(?)
@@ -1344,7 +1362,9 @@ pub async fn list_paid_history(
     } else {
         sqlx::query_as::<_, PaidHistory>(
             "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
-                    lsp.tong_tien_san_pham, lsp.tong_tien_gio, lsp.tong_tien_thanh_toan
+                    CAST(lsp.tong_tien_san_pham AS REAL) AS tong_tien_san_pham,
+                    CAST(lsp.tong_tien_gio AS REAL) AS tong_tien_gio,
+                    CAST(lsp.tong_tien_thanh_toan AS REAL) AS tong_tien_thanh_toan
              FROM lich_su_phong lsp
              JOIN phong p ON p.phong_id = lsp.phong_id
              WHERE lsp.trang_thai = 'DA_THANH_TOAN'
@@ -1362,7 +1382,9 @@ pub async fn get_history_order_items(
     history_id: i64,
 ) -> Result<Vec<HistoryOrderItem>, String> {
     sqlx::query_as::<_, HistoryOrderItem>(
-        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong, ct.don_gia, (ct.so_luong * ct.don_gia) AS thanh_tien
+        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong,
+                CAST(ct.don_gia AS REAL) AS don_gia,
+                CAST(ct.so_luong * ct.don_gia AS REAL) AS thanh_tien
          FROM lich_su_phong_san_pham ct
          JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
          WHERE ct.lich_su_phong_id = ?
@@ -1431,16 +1453,33 @@ pub async fn update_paid_history_bill(
             .map_err(|e| e.to_string())?;
 
             if result.rows_affected() == 0 {
-                return Err(format!(
-                    "Không tìm thấy sản phẩm {} trong hóa đơn để chỉnh sửa.",
-                    item.san_pham_id
-                ));
+                let don_gia: Option<f64> = sqlx::query_scalar(
+                    "SELECT CAST(don_gia AS REAL) FROM san_pham WHERE san_pham_id = ?",
+                )
+                .bind(&item.san_pham_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+                let Some(don_gia) = don_gia else {
+                    return Err(format!("Không tìm thấy sản phẩm {}.", item.san_pham_id));
+                };
+                sqlx::query(
+                    "INSERT INTO lich_su_phong_san_pham (lich_su_phong_id, san_pham_id, so_luong, don_gia)
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(payload.history_id)
+                .bind(&item.san_pham_id)
+                .bind(item.so_luong)
+                .bind(don_gia)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
             }
         }
     }
 
     let tong_tien_san_pham: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(so_luong * don_gia), 0)
+        "SELECT CAST(COALESCE(SUM(so_luong * don_gia), 0) AS REAL)
          FROM lich_su_phong_san_pham
          WHERE lich_su_phong_id = ?",
     )
@@ -1586,7 +1625,9 @@ pub async fn reprint_history_bill(
     };
 
     let items = sqlx::query_as::<_, HistoryOrderItem>(
-        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong, ct.don_gia, (ct.so_luong * ct.don_gia) AS thanh_tien
+        "SELECT ct.san_pham_id, sp.ten_san_pham, ct.so_luong,
+                CAST(ct.don_gia AS REAL) AS don_gia,
+                CAST(ct.so_luong * ct.don_gia AS REAL) AS thanh_tien
          FROM lich_su_phong_san_pham ct
          JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
          WHERE ct.lich_su_phong_id = ?
@@ -1597,9 +1638,7 @@ pub async fn reprint_history_bill(
     .await
     .map_err(|e| e.to_string())?;
 
-    let tong_thanh_toan = bill
-        .try_get::<f64, _>("tong_tien_thanh_toan")
-        .map_err(|e| e.to_string())?;
+    let tong_thanh_toan = sqlite_f64(&bill, "tong_tien_thanh_toan")?;
     let cfg = qr_settings.unwrap_or_default();
     let mut content = compose_receipt_bill(
         history_id,
@@ -1612,10 +1651,8 @@ pub async fn reprint_history_bill(
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "--".to_string()),
         &items,
-        bill.try_get::<f64, _>("tong_tien_san_pham")
-            .map_err(|e| e.to_string())?,
-        bill.try_get::<f64, _>("tong_tien_gio")
-            .map_err(|e| e.to_string())?,
+        sqlite_f64(&bill, "tong_tien_san_pham")?,
+        sqlite_f64(&bill, "tong_tien_gio")?,
         tong_thanh_toan,
     );
     if !cfg.print_qr_on_receipt {

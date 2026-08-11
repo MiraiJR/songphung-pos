@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Trash2, X } from "lucide-react";
+import { Loader2, Trash2, X } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
 import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
@@ -19,15 +19,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import type { HistoryOrderItem, PaidHistory } from "@/types/karaoke";
+import type { HistoryOrderItem, PaidHistory, Product } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
 
 type Props = {
   histories: PaidHistory[];
   historyItems: HistoryOrderItem[];
+  products: Product[];
   historyDate: string;
   onDateChange: (v: string) => void;
-  onFilter: () => void;
+  onFilter: () => void | Promise<void>;
   onOpenDetail: (historyId: number) => Promise<void>;
   onReprintBill: (historyId: number, selectedQrThanhToanId: number | null) => Promise<string>;
   qrThanhToanOptions: Array<{ qr_thanh_toan_id: number; qr_thanh_toan_ten: string }>;
@@ -84,6 +85,7 @@ function formatBillDuration(startRaw: string, endRaw: string | null): string {
 export function HistoryPage({
   histories,
   historyItems,
+  products,
   historyDate,
   onDateChange,
   onFilter,
@@ -120,38 +122,59 @@ export function HistoryPage({
   const [editTienGio, setEditTienGio] = useState("0");
   const [editTongTien, setEditTongTien] = useState("0");
   const [editQtyByProductId, setEditQtyByProductId] = useState<Record<string, string>>({});
+  const [editLines, setEditLines] = useState<Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>>([]);
+  const [editProductKeyword, setEditProductKeyword] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [filtering, setFiltering] = useState(false);
+  const [openingActionId, setOpeningActionId] = useState<number | null>(null);
   const [editInitializedForHistoryId, setEditInitializedForHistoryId] = useState<number | null>(null);
   const [editPrintAfterSave, setEditPrintAfterSave] = useState(false);
   const optionButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   async function handleViewDetail(item: PaidHistory) {
-    await onOpenDetail(item.lich_su_phong_id);
-    setSelectedHistory(item);
-    setDetailOpen(true);
-    setMenuHistoryId(null);
+    setOpeningActionId(item.lich_su_phong_id);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+      setSelectedHistory(item);
+      setDetailOpen(true);
+    } finally {
+      setOpeningActionId(null);
+      setMenuHistoryId(null);
+      setMenuPosition(null);
+    }
   }
 
   async function handleOpenEdit(item: PaidHistory) {
-    await onOpenDetail(item.lich_su_phong_id);
-    setEditingHistory(item);
-    setEditTienGio(formatMoneyInput(String(Math.round(item.tong_tien_gio))));
-    setEditTongTien(formatMoneyInput(String(Math.round(item.tong_tien_thanh_toan))));
-    setEditQtyByProductId({});
-    setEditInitializedForHistoryId(null);
-    setEditPrintAfterSave(false);
-    setEditOpen(true);
-    setMenuHistoryId(null);
+    setOpeningActionId(item.lich_su_phong_id);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+      setEditingHistory(item);
+      setEditTienGio(formatMoneyInput(String(Math.round(item.tong_tien_gio))));
+      setEditTongTien(formatMoneyInput(String(Math.round(item.tong_tien_thanh_toan))));
+      setEditQtyByProductId({});
+      setEditLines([]);
+      setEditProductKeyword("");
+      setEditInitializedForHistoryId(null);
+      setEditPrintAfterSave(false);
+      setEditOpen(true);
+    } finally {
+      setOpeningActionId(null);
+      setMenuHistoryId(null);
+      setMenuPosition(null);
+    }
   }
 
   async function requestReprint(item: PaidHistory) {
+    setOpeningActionId(item.lich_su_phong_id);
     setMenuHistoryId(null);
     setMenuPosition(null);
     try {
       await onOpenDetail(item.lich_su_phong_id);
     } catch {
       // keep modal open flow even if detail refresh fails
+    } finally {
+      setOpeningActionId(null);
     }
     setReprintTarget(item);
     setReprintSelectedQrId(defaultSelectedQrThanhToanId);
@@ -197,12 +220,32 @@ export function HistoryPage({
   useEffect(() => {
     if (!editOpen || !editingHistory) return;
     if (editInitializedForHistoryId === editingHistory.lich_su_phong_id) return;
-    if (historyItems.length === 0) return;
+    setEditLines(
+      historyItems.map((row) => ({
+        san_pham_id: row.san_pham_id,
+        ten_san_pham: row.ten_san_pham,
+        don_gia: row.don_gia,
+      })),
+    );
     setEditQtyByProductId(
       Object.fromEntries(historyItems.map((row) => [row.san_pham_id, String(row.so_luong)])),
     );
     setEditInitializedForHistoryId(editingHistory.lich_su_phong_id);
   }, [editOpen, editingHistory, editInitializedForHistoryId, historyItems]);
+
+  function recalcEditTotal(
+    nextLines: Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>,
+    nextQty: Record<string, string>,
+    nextHourRaw: string,
+  ) {
+    const productsTotal = nextLines.reduce((sum, item) => {
+      const qty = Number(nextQty[item.san_pham_id] ?? 0);
+      return sum + item.don_gia * (Number.isFinite(qty) && qty >= 0 ? qty : 0);
+    }, 0);
+    const hour = parseMoneyInput(nextHourRaw);
+    const hourSafe = Number.isFinite(hour) && hour >= 0 ? hour : 0;
+    setEditTongTien(formatMoneyInput(String(Math.round(productsTotal + hourSafe))));
+  }
 
   async function handleSaveEdit() {
     if (!editingHistory) return;
@@ -219,8 +262,8 @@ export function HistoryPage({
 
     const payloadItems: Array<{ san_pham_id: string; so_luong: number }> = [];
     const donGiaBySanPhamId: Record<string, number> = {};
-    for (const row of historyItems) {
-      const raw = editQtyByProductId[row.san_pham_id] ?? String(row.so_luong);
+    for (const row of editLines) {
+      const raw = editQtyByProductId[row.san_pham_id] ?? "0";
       const qty = Number(raw);
       if (!Number.isInteger(qty) || qty < 0) {
         toast.error(`Số lượng không hợp lệ cho món ${row.ten_san_pham}.`);
@@ -326,10 +369,24 @@ export function HistoryPage({
   const allSelected = histories.length > 0 && selectedIds.size === histories.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < histories.length;
   const totalRevenue = histories.reduce((sum, item) => sum + item.tong_tien_thanh_toan, 0);
-  const editTongTienMon = historyItems.reduce((sum, item) => {
-    const qty = Number(editQtyByProductId[item.san_pham_id] ?? item.so_luong);
+  const editTongTienMon = editLines.reduce((sum, item) => {
+    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
     return sum + item.don_gia * (Number.isFinite(qty) && qty >= 0 ? qty : 0);
   }, 0);
+  const addableProducts = products.filter((product) => {
+    if (editLines.some((line) => line.san_pham_id === product.san_pham_id)) return false;
+    if (!editProductKeyword.trim()) return true;
+    return product.ten_san_pham.toLowerCase().includes(editProductKeyword.trim().toLowerCase());
+  });
+
+  async function handleFilter() {
+    setFiltering(true);
+    try {
+      await Promise.resolve(onFilter());
+    } finally {
+      setFiltering(false);
+    }
+  }
 
   useEffect(() => {
     if (menuHistoryId == null) return;
@@ -372,8 +429,15 @@ export function HistoryPage({
         </div>
         <div className="flex items-center gap-2">
           <DatePicker value={historyDate} onChange={onDateChange} />
-          <Button className="h-[48px]" variant="default" onClick={onFilter}>
-            Lọc
+          <Button className="h-[48px]" variant="default" disabled={filtering} onClick={() => void handleFilter()}>
+            {filtering ? (
+              <>
+                <Loader2 className="mr-1.5 size-4 animate-spin" />
+                Đang lọc...
+              </>
+            ) : (
+              "Lọc"
+            )}
           </Button>
         </div>
       </div>
@@ -492,7 +556,8 @@ export function HistoryPage({
                         optionButtonRefs.current[item.lich_su_phong_id] = el;
                       }}
                       type="button"
-                      className="relative z-20 rounded-md bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200"
+                      className="relative z-20 rounded-md bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={openingActionId === item.lich_su_phong_id || reprintingHistoryId === item.lich_su_phong_id}
                       onClick={(e) => {
                         const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                         setMenuHistoryId((prev) => {
@@ -509,7 +574,7 @@ export function HistoryPage({
                         });
                       }}
                     >
-                      Tùy chọn
+                      {openingActionId === item.lich_su_phong_id ? "Đang mở..." : "Tùy chọn"}
                     </button>
                   </div>
                 </div>
@@ -533,17 +598,19 @@ export function HistoryPage({
           >
             <button
               type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100"
+              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
+              disabled={openingActionId != null}
               onClick={() => {
                 const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
                 if (item) void handleViewDetail(item);
               }}
             >
-              Xem chi tiết
+              {openingActionId === menuHistoryId ? "Đang mở..." : "Xem chi tiết"}
             </button>
             <button
               type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100"
+              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
+              disabled={openingActionId != null}
               onClick={() => {
                 const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
                 if (item) void handleOpenEdit(item);
@@ -553,7 +620,8 @@ export function HistoryPage({
             </button>
             <button
               type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100"
+              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
+              disabled={openingActionId != null || reprintingHistoryId != null}
               onClick={() => {
                 const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
                 if (item) void requestReprint(item);
@@ -716,7 +784,9 @@ export function HistoryPage({
             </button>
             <div className="border-b border-slate-200 px-5 py-4">
               <h3 className="text-lg font-semibold">Chỉnh sửa hóa đơn #{editingHistory.lich_su_phong_id}</h3>
-              <p className="mt-1 text-sm text-slate-500">Cập nhật tiền giờ, tổng tiền và số lượng sản phẩm.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Sửa tiền giờ, số lượng, thêm món mới hoặc đặt SL = 0 để xóa món trên hóa đơn đã thanh toán.
+              </p>
             </div>
 
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-5 lg:grid-cols-[1fr_320px]">
@@ -727,15 +797,21 @@ export function HistoryPage({
                       <label className="mb-1 block text-sm font-medium text-slate-700">Tiền giờ</label>
                       <input
                         className="app-input w-full"
+                        disabled={savingEdit}
                         value={editTienGio}
                         inputMode="numeric"
-                        onChange={(e) => setEditTienGio(formatMoneyInput(e.target.value))}
+                        onChange={(e) => {
+                          const nextHour = formatMoneyInput(e.target.value);
+                          setEditTienGio(nextHour);
+                          recalcEditTotal(editLines, editQtyByProductId, nextHour);
+                        }}
                       />
                     </div>
                     <div>
                       <label className="mb-1 block text-sm font-medium text-slate-700">Tổng tiền</label>
                       <input
                         className="app-input w-full"
+                        disabled={savingEdit}
                         value={editTongTien}
                         inputMode="numeric"
                         onChange={(e) => setEditTongTien(formatMoneyInput(e.target.value))}
@@ -756,8 +832,8 @@ export function HistoryPage({
                     <span className="text-right">Đơn giá</span>
                     <span className="text-right">Thành tiền mới</span>
                   </div>
-                  {historyItems.map((item) => {
-                    const qty = Number(editQtyByProductId[item.san_pham_id] ?? item.so_luong);
+                  {editLines.map((item) => {
+                    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
                     const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
                     const thanhTienMoi = qtySafe * item.don_gia;
                     return (
@@ -767,30 +843,79 @@ export function HistoryPage({
                           type="number"
                           min={0}
                           className="app-input h-8"
-                          value={editQtyByProductId[item.san_pham_id] ?? String(item.so_luong)}
-                          onChange={(e) =>
-                            setEditQtyByProductId((prev) => ({
-                              ...prev,
+                          disabled={savingEdit}
+                          value={editQtyByProductId[item.san_pham_id] ?? "0"}
+                          onChange={(e) => {
+                            const nextQty = {
+                              ...editQtyByProductId,
                               [item.san_pham_id]: e.target.value,
-                            }))
-                          }
+                            };
+                            setEditQtyByProductId(nextQty);
+                            recalcEditTotal(editLines, nextQty, editTienGio);
+                          }}
                         />
                         <span className="text-right text-slate-700">{item.don_gia.toLocaleString()}</span>
                         <span className="text-right font-semibold text-slate-800">{thanhTienMoi.toLocaleString()}</span>
                       </div>
                     );
                   })}
-                  {historyItems.length === 0 && (
-                    <div className="px-3 py-4 text-sm text-slate-500">Không có món nào trong hóa đơn này.</div>
+                  {editLines.length === 0 && (
+                    <div className="px-3 py-4 text-sm text-slate-500">Chưa có món. Thêm món từ danh sách bên dưới.</div>
                   )}
                 </div>
 
+                <div className="mt-3 rounded-lg border border-slate-200 p-3">
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Thêm món vào hóa đơn</label>
+                  <input
+                    className="app-input w-full"
+                    placeholder="Tìm món để thêm..."
+                    disabled={savingEdit}
+                    value={editProductKeyword}
+                    onChange={(e) => setEditProductKeyword(e.target.value)}
+                  />
+                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                    {addableProducts.slice(0, 20).map((product) => (
+                      <button
+                        key={product.san_pham_id}
+                        type="button"
+                        disabled={savingEdit}
+                        className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-slate-50 disabled:opacity-50"
+                        onClick={() => {
+                          const nextLines = [
+                            ...editLines,
+                            {
+                              san_pham_id: product.san_pham_id,
+                              ten_san_pham: product.ten_san_pham,
+                              don_gia: product.don_gia,
+                            },
+                          ];
+                          const nextQty = {
+                            ...editQtyByProductId,
+                            [product.san_pham_id]: "1",
+                          };
+                          setEditLines(nextLines);
+                          setEditQtyByProductId(nextQty);
+                          setEditProductKeyword("");
+                          recalcEditTotal(nextLines, nextQty, editTienGio);
+                        }}
+                      >
+                        <span className="font-medium text-slate-800">{product.ten_san_pham}</span>
+                        <span className="text-slate-600">{product.don_gia.toLocaleString()}</span>
+                      </button>
+                    ))}
+                    {addableProducts.length === 0 && (
+                      <p className="px-1 py-2 text-sm text-slate-500">Không còn món phù hợp để thêm.</p>
+                    )}
+                  </div>
+                </div>
+
                 <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Đặt số lượng = 0 để xóa món khỏi hóa đơn đã thanh toán.
+                  Đặt số lượng = 0 để xóa món khỏi hóa đơn đã thanh toán. In sau khi lưu là tùy chọn, không bắt buộc máy in để lưu.
                 </div>
                 <div className="mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
                   <Checkbox
                     checked={editPrintAfterSave}
+                    disabled={savingEdit}
                     onCheckedChange={(checked) => setEditPrintAfterSave(checked === true)}
                   />
                   <span className="text-slate-700">In hóa đơn sau khi lưu chỉnh sửa</span>
@@ -802,8 +927,8 @@ export function HistoryPage({
                 <div className="mx-auto w-full max-w-[80mm] rounded border border-slate-200 bg-white p-3 text-[12px] font-mono shadow-sm">
                   <div className="text-center text-sm font-bold">PHIẾU THANH TOÁN</div>
                   <div className="mt-1 border-y border-dashed border-slate-300 py-1">
-                    {historyItems.map((item) => {
-                      const qty = Number(editQtyByProductId[item.san_pham_id] ?? item.so_luong);
+                    {editLines.map((item) => {
+                      const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
                       const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
                       return (
                         <div key={`pv-${item.san_pham_id}`} className="grid grid-cols-[1fr,40px,70px] text-[11px]">
@@ -836,8 +961,19 @@ export function HistoryPage({
               <button className="btn-ghost" disabled={savingEdit} onClick={() => setEditOpen(false)}>
                 Hủy
               </button>
-              <button className="btn-secondary" disabled={savingEdit} onClick={() => void handleSaveEdit()}>
-                {savingEdit ? "Đang lưu..." : "Lưu chỉnh sửa"}
+              <button
+                className="btn-secondary inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={savingEdit}
+                onClick={() => void handleSaveEdit()}
+              >
+                {savingEdit ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang lưu...
+                  </>
+                ) : (
+                  "Lưu chỉnh sửa"
+                )}
               </button>
             </div>
           </div>

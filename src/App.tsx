@@ -106,6 +106,9 @@ function AppShell() {
   const [qtyInput, setQtyInput] = useState("1");
   const [printerTarget, setPrinterTarget] = useState("");
   const [printTemporaryBillLoading, setPrintTemporaryBillLoading] = useState(false);
+  const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
   const [printBillQr, setPrintBillQr] = useState(true);
   const [qrUseFixedAmount, setQrUseFixedAmount] = useState(false);
   const [qrFixedAmountDisplay, setQrFixedAmountDisplay] = useState("");
@@ -306,23 +309,30 @@ function AppShell() {
   }
 
   async function saveOrderQty() {
-    if (!karaoke.currentSession || !selectedProduct) return;
+    if (!karaoke.currentSession || !selectedProduct || orderSubmitting) return;
     const qty = Number(qtyInput);
     if (Number.isNaN(qty) || qty < 0) return;
     const historyId = karaoke.currentSession.lich_su_phong_id;
-    if (qty === 0) {
-      await invoke("remove_order_item", { historyId, productId: selectedProduct.san_pham_id });
-    } else {
-      await invoke("add_or_update_order_item", {
-        historyId,
-        productId: selectedProduct.san_pham_id,
-        qty,
-        price: selectedProduct.don_gia,
-      });
+    setOrderSubmitting(true);
+    try {
+      if (qty === 0) {
+        await invoke("remove_order_item", { historyId, productId: selectedProduct.san_pham_id });
+      } else {
+        await invoke("add_or_update_order_item", {
+          historyId,
+          productId: selectedProduct.san_pham_id,
+          qty,
+          price: selectedProduct.don_gia,
+        });
+      }
+      setOrderModalOpen(false);
+      setSelectedProduct(null);
+      await karaoke.loadCurrentSession(karaoke.selectedRoomId);
+    } catch (error) {
+      window.alert(`Lưu món thất bại: ${String(error)}`);
+    } finally {
+      setOrderSubmitting(false);
     }
-    setOrderModalOpen(false);
-    setSelectedProduct(null);
-    await karaoke.loadCurrentSession(karaoke.selectedRoomId);
   }
 
   async function handleEditItem(item: OrderItem) {
@@ -368,11 +378,13 @@ function AppShell() {
   }
 
   async function handleCancelRoom() {
+    setCancelSubmitting(true);
     setCancelModalOpen(false);
 
     let historyId = karaoke.currentSession?.lich_su_phong_id ?? 0;
     if (!historyId) {
       if (!karaoke.selectedRoomId) {
+        setCancelSubmitting(false);
         window.alert("Vui lòng chọn phòng trước khi trả phòng.");
         return;
       }
@@ -383,6 +395,7 @@ function AppShell() {
     }
 
     if (!historyId) {
+      setCancelSubmitting(false);
       window.alert("Phòng hiện không có phiên phục vụ để trả.");
       return;
     }
@@ -393,6 +406,8 @@ function AppShell() {
       await karaoke.loadCurrentSession(karaoke.selectedRoomId);
     } catch (error) {
       window.alert(`Trả phòng thất bại: ${String(error)}`);
+    } finally {
+      setCancelSubmitting(false);
     }
   }
 
@@ -405,11 +420,19 @@ function AppShell() {
     const defaultAmount = Math.ceil(karaoke.currentSession.tong_tien_thanh_toan);
     setCheckoutHourAmount(formatAmountDigits(String(defaultHourAmount)));
     setCheckoutAmount(formatAmountDigits(String(defaultAmount)));
-    setCheckoutPrintReceipt(true);
+    const canPrint = printerTarget.trim().length > 0;
+    setCheckoutPrintReceipt(canPrint);
     setPrinterConnected(null);
-    setPrinterMessage("");
+    setPrinterMessage(canPrint ? "" : "Chưa cấu hình máy in. Vẫn có thể thanh toán mà không in hóa đơn.");
     setCheckoutModalOpen(true);
-    void checkPrinterConnection();
+    if (canPrint) {
+      void (async () => {
+        const status = await checkPrinterConnection();
+        if (!status?.connected) {
+          setCheckoutPrintReceipt(false);
+        }
+      })();
+    }
   }
 
   async function checkPrinterConnection() {
@@ -436,7 +459,7 @@ function AppShell() {
   }
 
   async function confirmCheckout() {
-    if (!karaoke.currentSession || !karaoke.selectedRoomId) return;
+    if (!karaoke.currentSession || !karaoke.selectedRoomId || checkoutSubmitting) return;
     const hourAmount = parseAmountInput(checkoutHourAmount);
     if (Number.isNaN(hourAmount) || hourAmount < 0) {
       window.alert("Tiền giờ không hợp lệ.");
@@ -447,34 +470,44 @@ function AppShell() {
       window.alert("Thành tiền không hợp lệ.");
       return;
     }
-    if (checkoutPrintReceipt) {
-      if (!printerTarget.trim()) {
-        window.alert("Bạn chưa cấu hình máy in. Vào Cài đặt > Máy in để cấu hình hoặc bỏ chọn 'In hóa đơn'.");
-        return;
+    setCheckoutSubmitting(true);
+    let shouldPrint = checkoutPrintReceipt;
+    try {
+      if (shouldPrint) {
+        if (!printerTarget.trim()) {
+          shouldPrint = false;
+          setCheckoutPrintReceipt(false);
+        } else {
+          const status = await checkPrinterConnection();
+          if (!status?.connected) {
+            shouldPrint = false;
+            setCheckoutPrintReceipt(false);
+            setPrinterMessage("Không kết nối được máy in. Vẫn tiếp tục thanh toán mà không in hóa đơn.");
+          }
+        }
       }
-      const status = await checkPrinterConnection();
-      if (!status?.connected) {
-        window.alert("Không kết nối được máy in. Vui lòng bỏ chọn 'In hóa đơn' để tiếp tục thanh toán.");
-        return;
-      }
+      await invoke("checkout_room", {
+        payload: {
+          history_id: karaoke.currentSession.lich_su_phong_id,
+          room_id: karaoke.selectedRoomId,
+          hour_amount: hourAmount,
+          final_amount: finalAmount,
+          print_receipt: shouldPrint,
+          printer_name_or_ip: printerTarget || null,
+          qr_settings: buildQrSettingsForRealBill({
+            printQrOnReceipt: printBillQr,
+            selectedQrThanhToanId,
+          }),
+        },
+      });
+      setCheckoutModalOpen(false);
+      await karaoke.loadMasterData();
+      await karaoke.loadCurrentSession(karaoke.selectedRoomId);
+    } catch (error) {
+      window.alert(`Thanh toán thất bại: ${String(error)}`);
+    } finally {
+      setCheckoutSubmitting(false);
     }
-    await invoke("checkout_room", {
-      payload: {
-        history_id: karaoke.currentSession.lich_su_phong_id,
-        room_id: karaoke.selectedRoomId,
-        hour_amount: hourAmount,
-        final_amount: finalAmount,
-        print_receipt: checkoutPrintReceipt,
-        printer_name_or_ip: printerTarget || null,
-        qr_settings: buildQrSettingsForRealBill({
-          printQrOnReceipt: printBillQr,
-          selectedQrThanhToanId,
-        }),
-      },
-    });
-    setCheckoutModalOpen(false);
-    await karaoke.loadMasterData();
-    await karaoke.loadCurrentSession(karaoke.selectedRoomId);
   }
 
   return (
@@ -503,13 +536,16 @@ function AppShell() {
                 onTransferRoom={handleTransferRoom}
                 onPrintTemporaryBill={requestTemporaryBill}
                 printTemporaryBillLoading={printTemporaryBillLoading}
+                checkoutLoading={checkoutSubmitting}
+                cancelLoading={cancelSubmitting}
               />
               {orderModalOpen && selectedProduct && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
                   <div className="relative w-[340px] rounded-lg bg-white p-4 shadow-lg">
                     <button
                       type="button"
-                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                      disabled={orderSubmitting}
                       onClick={() => {
                         setOrderModalOpen(false);
                         setSelectedProduct(null);
@@ -529,8 +565,10 @@ function AppShell() {
                       {["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", "C", "OK"].map((key) => (
                         <button
                           key={key}
-                          className={`rounded px-3 py-2 ${key === "OK" ? "bg-emerald-600 text-white" : "bg-slate-100"
-                            }`}
+                          disabled={orderSubmitting}
+                          className={`rounded px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            key === "OK" ? "bg-emerald-600 text-white" : "bg-slate-100"
+                          }`}
                           onClick={() => {
                             if (key === "C") {
                               setQtyInput("0");
@@ -550,6 +588,7 @@ function AppShell() {
                     <div className="mt-3 flex justify-end gap-2">
                       <button
                         className="btn-ghost"
+                        disabled={orderSubmitting}
                         onClick={() => {
                           setOrderModalOpen(false);
                           setSelectedProduct(null);
@@ -566,7 +605,8 @@ function AppShell() {
                   <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
                     <button
                       type="button"
-                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                      disabled={cancelSubmitting}
                       onClick={() => setCancelModalOpen(false)}
                       aria-label="Đóng"
                     >
@@ -579,15 +619,17 @@ function AppShell() {
                     <div className="mt-4 flex justify-end gap-2">
                       <button
                         className="btn-ghost"
+                        disabled={cancelSubmitting}
                         onClick={() => setCancelModalOpen(false)}
                       >
                         Không
                       </button>
                       <button
-                        className="rounded bg-rose-600 px-3 py-2 text-white"
+                        className="inline-flex items-center justify-center gap-2 rounded bg-rose-600 px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-70"
+                        disabled={cancelSubmitting}
                         onClick={() => void handleCancelRoom()}
                       >
-                        Đồng ý trả phòng
+                        {cancelSubmitting ? "Đang trả phòng..." : "Đồng ý trả phòng"}
                       </button>
                     </div>
                   </div>
@@ -598,7 +640,10 @@ function AppShell() {
                   open={checkoutModalOpen}
                   title="Xác nhận thanh toán"
                   confirmText="Xác nhận thanh toán"
-                  onClose={() => setCheckoutModalOpen(false)}
+                  busy={checkoutSubmitting}
+                  onClose={() => {
+                    if (!checkoutSubmitting) setCheckoutModalOpen(false);
+                  }}
                   onConfirm={() => void confirmCheckout()}
                   leftContent={
                     <>
@@ -614,7 +659,8 @@ function AppShell() {
                       <div className="mt-3">
                         <label className="mb-1 block text-sm text-slate-600">Tiền giờ</label>
                         <input
-                          className="w-full rounded border px-3 py-2 text-right text-xl"
+                          className="w-full rounded border px-3 py-2 text-right text-xl disabled:bg-slate-50"
+                          disabled={checkoutSubmitting}
                           value={checkoutHourAmount}
                           onChange={(e) => {
                             const digits = e.target.value.replace(/\D/g, "");
@@ -630,7 +676,8 @@ function AppShell() {
                       <div className="mt-3">
                         <label className="mb-1 block text-sm text-slate-600">Thành tiền</label>
                         <input
-                          className="w-full rounded border px-3 py-2 text-right text-xl"
+                          className="w-full rounded border px-3 py-2 text-right text-xl disabled:bg-slate-50"
+                          disabled={checkoutSubmitting}
                           value={checkoutAmount}
                           onChange={(e) => {
                             const digits = e.target.value.replace(/\D/g, "");
@@ -642,6 +689,7 @@ function AppShell() {
                       <label className="mt-3 inline-flex items-center gap-2 text-sm">
                         <Checkbox
                           checked={checkoutPrintReceipt}
+                          disabled={checkoutSubmitting}
                           onCheckedChange={(checked) => {
                             const next = checked === true;
                             setCheckoutPrintReceipt(next);
@@ -680,12 +728,24 @@ function AppShell() {
                           Đã tắt mã QR trong Cài đặt. Hóa đơn sẽ in không kèm QR.
                         </p>
                       )}
-                      {checkoutPrintReceipt && (
+                      {!checkoutPrintReceipt && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Thanh toán không bắt buộc máy in. Bỏ chọn in hóa đơn để hoàn tất ngay.
+                        </p>
+                      )}
+                      {(checkoutPrintReceipt || printerMessage) && (
                         <div
-                          className={`mt-2 rounded px-2 py-1 text-sm ${printerConnected ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                            }`}
+                          className={`mt-2 rounded px-2 py-1 text-sm ${
+                            checkoutPrintReceipt
+                              ? printerConnected
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-rose-50 text-rose-700"
+                              : "bg-amber-50 text-amber-800"
+                          }`}
                         >
-                          {printerChecking ? "Đang kiểm tra kết nối máy in..." : printerMessage || "Chưa kiểm tra máy in"}
+                          {printerChecking
+                            ? "Đang kiểm tra kết nối máy in..."
+                            : printerMessage || "Chưa kiểm tra máy in"}
                         </div>
                       )}
                     </>
@@ -874,9 +934,10 @@ function AppShell() {
             <HistoryPage
               histories={karaoke.histories}
               historyItems={karaoke.historyItems}
+              products={karaoke.products}
               historyDate={historyDate}
               onDateChange={setHistoryDate}
-              onFilter={() => void karaoke.loadHistory(historyDate)}
+              onFilter={() => karaoke.loadHistory(historyDate)}
               onOpenDetail={(historyId) => karaoke.loadHistoryDetail(historyId)}
               onReprintBill={async (historyId, selectedQrId) => {
                 const printer = await invoke<{ connected: boolean; message: string }>(

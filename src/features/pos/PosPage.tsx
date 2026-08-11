@@ -22,6 +22,8 @@ type Props = {
   onTransferRoom: (targetRoomId: number) => Promise<void>;
   onPrintTemporaryBill: () => Promise<void>;
   printTemporaryBillLoading?: boolean;
+  checkoutLoading?: boolean;
+  cancelLoading?: boolean;
 };
 
 export function PosPage(props: Props) {
@@ -43,7 +45,10 @@ export function PosPage(props: Props) {
     onTransferRoom,
     onPrintTemporaryBill,
     printTemporaryBillLoading = false,
+    checkoutLoading = false,
+    cancelLoading = false,
   } = props;
+  const actionBusy = printTemporaryBillLoading || checkoutLoading || cancelLoading;
   const [keyword, setKeyword] = useState("");
   const [activeGroupId, setActiveGroupId] = useState<string>("ALL");
   const [transferModalOpen, setTransferModalOpen] = useState(false);
@@ -189,7 +194,7 @@ export function PosPage(props: Props) {
                   <button
                     type="button"
                     className="btn-primary inline-flex min-w-0 w-full items-center justify-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                    disabled={printTemporaryBillLoading}
+                    disabled={actionBusy}
                     aria-busy={printTemporaryBillLoading}
                     onClick={() => void onPrintTemporaryBill()}
                   >
@@ -202,32 +207,77 @@ export function PosPage(props: Props) {
                       "In phiếu"
                     )}
                   </button>
-                  <button type="button" className="btn-danger min-w-0 w-full" onClick={onCancelRoom}>
-                    Trả phòng
+                  <button
+                    type="button"
+                    className="btn-danger inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={actionBusy}
+                    onClick={onCancelRoom}
+                  >
+                    {cancelLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                        Đang trả phòng…
+                      </>
+                    ) : (
+                      "Trả phòng"
+                    )}
                   </button>
                 </div>
                 <button
                   type="button"
-                  className="btn-secondary mt-2 w-full"
+                  className="btn-secondary mt-2 inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={actionBusy}
                   onClick={onCheckout}
                 >
-                  Thanh toán
+                  {checkoutLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      Đang thanh toán…
+                    </>
+                  ) : (
+                    "Thanh toán"
+                  )}
                 </button>
               </>
             ) : (
               <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                <button type="button" className="btn-danger min-w-0 w-full" onClick={onCancelRoom}>
-                  Trả phòng
+                <button
+                  type="button"
+                  className="btn-danger inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={actionBusy}
+                  onClick={onCancelRoom}
+                >
+                  {cancelLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      Đang trả phòng…
+                    </>
+                  ) : (
+                    "Trả phòng"
+                  )}
                 </button>
-                <button type="button" className="btn-secondary min-w-0 w-full" onClick={onCheckout}>
-                  Thanh toán
+                <button
+                  type="button"
+                  className="btn-secondary inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={actionBusy}
+                  onClick={onCheckout}
+                >
+                  {checkoutLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      Đang thanh toán…
+                    </>
+                  ) : (
+                    "Thanh toán"
+                  )}
                 </button>
               </div>
             )}
             {currentSession && (
               <button
                 type="button"
-                className="btn-ghost mt-2 w-full border border-slate-200 text-sm"
+                className="btn-ghost mt-2 w-full border border-slate-200 text-sm disabled:cursor-not-allowed disabled:opacity-70"
+                disabled={actionBusy}
                 onClick={() => setTransferModalOpen(true)}
               >
                 Chuyển phòng
