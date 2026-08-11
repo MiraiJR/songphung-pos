@@ -60,10 +60,6 @@ export function PrinterSettingsPage({
       qrUseFixedAmount: qrUseFixedAmount,
       qrFixedAmountVnd: Number.isFinite(fixedAmountVnd) ? Math.max(0, Math.floor(fixedAmountVnd)) : 0,
       selectedQrThanhToanId: selectedQrThanhToanId,
-      print_qr_on_receipt: printBillQr,
-      qr_use_fixed_amount: qrUseFixedAmount,
-      qr_fixed_amount_vnd: Number.isFinite(fixedAmountVnd) ? Math.max(0, Math.floor(fixedAmountVnd)) : 0,
-      selected_qr_thanh_toan_id: selectedQrThanhToanId,
     };
   }, [printBillQr, qrUseFixedAmount, qrFixedAmountDisplay, selectedQrThanhToanId]);
 

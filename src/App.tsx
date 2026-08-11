@@ -34,10 +34,6 @@ type BillQrSettings = {
   qrUseFixedAmount: boolean;
   qrFixedAmountVnd: number;
   selectedQrThanhToanId: number | null;
-  print_qr_on_receipt: boolean;
-  qr_use_fixed_amount: boolean;
-  qr_fixed_amount_vnd: number;
-  selected_qr_thanh_toan_id: number | null;
 };
 
 type QrThanhToan = {
@@ -55,10 +51,6 @@ function buildQrSettingsForRealBill(input: {
     qrUseFixedAmount: false,
     qrFixedAmountVnd: 0,
     selectedQrThanhToanId: input.selectedQrThanhToanId,
-    print_qr_on_receipt: input.printQrOnReceipt,
-    qr_use_fixed_amount: false,
-    qr_fixed_amount_vnd: 0,
-    selected_qr_thanh_toan_id: input.selectedQrThanhToanId,
   };
 }
 
