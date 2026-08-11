@@ -517,11 +517,11 @@ pub fn check_printer_target_connection(printer_name_or_ip: &str) -> Result<(), S
 
 fn resolve_qr_png_for_bill_content<'a>(content: &str, qr_png: Option<&'a [u8]>) -> Option<&'a [u8]> {
     if !content.contains(BILL_QR_MARKER_LINE) {
-        return qr_png;
+        return None;
     }
     match qr_png {
         Some(bytes) if !bytes.is_empty() => Some(bytes),
-        Some(_) | None => Some(crate::bill_qr::default_qr_png_bytes()),
+        _ => None,
     }
 }
 
@@ -614,6 +614,26 @@ mod tests {
                 nfd_chars.iter().map(|c| format!("U+{:04X}", *c as u32)).collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn strip_qr_marker_removes_placeholder_line() {
+        let content = "TỔNG CỘNG\n@@BILL_QR@@\nCẢM ƠN";
+        let stripped = strip_bill_qr_marker(content);
+        assert!(!stripped.contains("@@BILL_QR@@"));
+        assert!(stripped.contains("TỔNG CỘNG"));
+        assert!(stripped.contains("CẢM ƠN"));
+    }
+
+    #[test]
+    fn missing_qr_bytes_do_not_fallback_when_marker_exists() {
+        assert!(resolve_qr_png_for_bill_content("@@BILL_QR@@", None).is_none());
+        assert!(resolve_qr_png_for_bill_content("@@BILL_QR@@", Some(&[])).is_none());
+    }
+
+    #[test]
+    fn no_marker_never_prints_qr() {
+        assert!(resolve_qr_png_for_bill_content("PHIẾU TẠM TÍNH", Some(&[1, 2, 3])).is_none());
     }
 
     #[test]

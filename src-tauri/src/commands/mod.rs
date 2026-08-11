@@ -132,35 +132,39 @@ pub struct UpdateProductPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct CheckoutPayload {
+    #[serde(alias = "historyId")]
     pub history_id: i64,
+    #[serde(alias = "roomId")]
     pub room_id: i64,
+    #[serde(alias = "hourAmount")]
     pub hour_amount: Option<f64>,
+    #[serde(alias = "finalAmount")]
     pub final_amount: f64,
+    #[serde(alias = "printReceipt")]
     pub print_receipt: bool,
+    #[serde(alias = "printerNameOrIp")]
     pub printer_name_or_ip: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "qrSettings")]
     pub qr_settings: BillQrPrintSettings,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BillQrPrintSettings {
-    #[serde(default = "bill_qr_print_default_true")]
+    #[serde(default, alias = "print_qr_on_receipt")]
     pub print_qr_on_receipt: bool,
-    #[serde(default)]
+    #[serde(default, alias = "qr_use_fixed_amount")]
     pub qr_use_fixed_amount: bool,
-    #[serde(default)]
+    #[serde(default, alias = "qr_fixed_amount_vnd")]
     pub qr_fixed_amount_vnd: u64,
+    #[serde(default, alias = "selected_qr_thanh_toan_id")]
     pub selected_qr_thanh_toan_id: Option<i64>,
-}
-
-fn bill_qr_print_default_true() -> bool {
-    true
 }
 
 impl Default for BillQrPrintSettings {
     fn default() -> Self {
         Self {
-            print_qr_on_receipt: true,
+            print_qr_on_receipt: false,
             qr_use_fixed_amount: false,
             qr_fixed_amount_vnd: 0,
             selected_qr_thanh_toan_id: None,
@@ -176,22 +180,35 @@ pub struct TransferRoomPayload {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TemporaryBillLine {
+    #[serde(alias = "ten_san_pham")]
     pub ten_san_pham: String,
+    #[serde(alias = "so_luong")]
     pub so_luong: i64,
+    #[serde(alias = "don_gia")]
     pub don_gia: f64,
+    #[serde(alias = "thanh_tien")]
     pub thanh_tien: f64,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TemporaryBillData {
+    #[serde(alias = "room_name")]
     pub room_name: String,
+    #[serde(alias = "gio_bat_dau")]
     pub gio_bat_dau: String,
+    #[serde(alias = "gio_hien_tai")]
     pub gio_hien_tai: String,
+    #[serde(alias = "lich_su_phong_id")]
     pub lich_su_phong_id: i64,
     pub items: Vec<TemporaryBillLine>,
+    #[serde(alias = "tong_tien_san_pham")]
     pub tong_tien_san_pham: f64,
+    #[serde(alias = "tong_tien_gio")]
     pub tong_tien_gio: f64,
+    #[serde(alias = "tong_tam_tinh")]
     pub tong_tam_tinh: f64,
 }
 
@@ -278,6 +295,30 @@ fn validate_static_vietqr(code: &str) -> Result<String, String> {
         return Err("QR không hợp lệ: chuỗi quá ngắn.".to_string());
     }
     Ok(trimmed.to_string())
+}
+
+async fn qr_png_for_settings(
+    pool: &sqlx::SqlitePool,
+    cfg: &BillQrPrintSettings,
+    bill_amount: f64,
+) -> Result<Option<Vec<u8>>, String> {
+    if !cfg.print_qr_on_receipt {
+        return Ok(None);
+    }
+    let base_qr = resolve_selected_qr_code(pool, cfg.selected_qr_thanh_toan_id).await?;
+    let amount = if cfg.qr_use_fixed_amount {
+        cfg.qr_fixed_amount_vnd as f64
+    } else {
+        bill_amount
+    };
+    Ok(crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok())
+}
+
+fn content_for_print(mut content: String, print_qr: bool) -> String {
+    if !print_qr {
+        content = crate::printer::strip_bill_qr_marker(&content);
+    }
+    content
 }
 
 async fn resolve_selected_qr_code(
@@ -374,6 +415,7 @@ fn compose_receipt_bill(
     total_product: f64,
     total_hour: f64,
     total_paid: f64,
+    include_qr: bool,
 ) -> String {
     use crate::printer::receipt_format as rf;
 
@@ -421,15 +463,17 @@ fn compose_receipt_bill(
         &format_currency(total_paid),
     ));
     content.push_str(&rf::line_sep());
-    content.push_str(crate::printer::BILL_QR_MARKER_LINE);
-    content.push('\n');
+    if include_qr {
+        content.push_str(crate::printer::BILL_QR_MARKER_LINE);
+        content.push('\n');
+    }
     content.push_str(&rf::lines_wrapped_centered(
         "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
     ));
     content
 }
 
-fn compose_temporary_bill(data: &TemporaryBillData) -> String {
+fn compose_temporary_bill(data: &TemporaryBillData, include_qr: bool) -> String {
     use crate::printer::receipt_format as rf;
 
     let mut content = String::new();
@@ -480,8 +524,10 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
         &format_currency(data.tong_tam_tinh),
     ));
     content.push_str(&rf::line_sep());
-    content.push_str(crate::printer::BILL_QR_MARKER_LINE);
-    content.push('\n');
+    if include_qr {
+        content.push_str(crate::printer::BILL_QR_MARKER_LINE);
+        content.push('\n');
+    }
     content.push_str(&rf::lines_wrapped_centered(
         "HÂN HẠNH ĐƯỢC PHỤC VỤ QUÝ KHÁCH!",
     ));
@@ -489,7 +535,7 @@ fn compose_temporary_bill(data: &TemporaryBillData) -> String {
 }
 
 /// Mẫu hóa đơn minh họa K80 — dùng cho xem trước UI và lệnh in thử máy in.
-fn compose_printer_test_sample_receipt() -> String {
+fn compose_printer_test_sample_receipt(include_qr: bool) -> String {
     let items: Vec<HistoryOrderItem> = vec![
         HistoryOrderItem {
             san_pham_id: String::new(),
@@ -522,12 +568,13 @@ fn compose_printer_test_sample_receipt() -> String {
         206_000.0,
         245_000.0,
         451_000.0,
+        include_qr,
     )
 }
 
 #[tauri::command]
 pub fn get_sample_receipt_preview() -> String {
-    compose_printer_test_sample_receipt()
+    compose_printer_test_sample_receipt(true)
 }
 
 #[tauri::command]
@@ -1232,43 +1279,33 @@ pub async fn checkout_room(
 
     if payload.print_receipt {
         let target = resolve_printer_target(payload.printer_name_or_ip.clone())?;
-        let mut content = compose_receipt_bill(
-            payload.history_id,
-            &checkout_bill
-                .try_get::<String, _>("ten_phong")
-                .map_err(|e| e.to_string())?,
-            &checkout_bill
-                .try_get::<String, _>("gio_bat_dau")
-                .map_err(|e| e.to_string())?,
-            &checkout_bill
-                .try_get::<Option<String>, _>("gio_ket_thuc")
-                .map_err(|e| e.to_string())?
-                .unwrap_or_else(|| "--".to_string()),
-            &checkout_items,
-            tong_tien_san_pham,
-            tong_tien_gio,
-            payload.final_amount,
-        );
         let qr_cfg = payload.qr_settings;
-        if !qr_cfg.print_qr_on_receipt {
-            content = crate::printer::strip_bill_qr_marker(&content);
-        }
-        let qr = if qr_cfg.print_qr_on_receipt {
-            let base_qr =
-                resolve_selected_qr_code(pool, qr_cfg.selected_qr_thanh_toan_id).await?;
-            let amount = if qr_cfg.qr_use_fixed_amount {
-                qr_cfg.qr_fixed_amount_vnd as f64
-            } else {
-                payload.final_amount
-            };
-            crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
-        } else {
-            None
-        };
+        let content = content_for_print(
+            compose_receipt_bill(
+                payload.history_id,
+                &checkout_bill
+                    .try_get::<String, _>("ten_phong")
+                    .map_err(|e| e.to_string())?,
+                &checkout_bill
+                    .try_get::<String, _>("gio_bat_dau")
+                    .map_err(|e| e.to_string())?,
+                &checkout_bill
+                    .try_get::<Option<String>, _>("gio_ket_thuc")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_else(|| "--".to_string()),
+                &checkout_items,
+                tong_tien_san_pham,
+                tong_tien_gio,
+                payload.final_amount,
+                qr_cfg.print_qr_on_receipt,
+            ),
+            qr_cfg.print_qr_on_receipt,
+        );
+        let qr = qr_png_for_settings(pool, &qr_cfg, payload.final_amount).await?;
         let _ = crate::printer::print_receipt_to_target(
             &target,
             &content,
-            qr.as_ref().map(|b| b.as_slice()),
+            qr.as_deref(),
         );
     }
     Ok(())
@@ -1546,23 +1583,12 @@ pub async fn test_printer(
     }
     crate::printer::check_printer_target_connection(target)?;
     let cfg = qr_settings.unwrap_or_default();
-    let mut content = compose_printer_test_sample_receipt();
-    if !cfg.print_qr_on_receipt {
-        content = crate::printer::strip_bill_qr_marker(&content);
-    }
-    let qr = if cfg.print_qr_on_receipt {
-        let base_qr =
-            resolve_selected_qr_code(state.pool(), cfg.selected_qr_thanh_toan_id).await?;
-        let amount = if cfg.qr_use_fixed_amount {
-            cfg.qr_fixed_amount_vnd as f64
-        } else {
-            451_000.0
-        };
-        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
-    } else {
-        None
-    };
-    crate::printer::print_receipt_to_target(target, &content, qr.as_ref().map(|b| b.as_slice()))?;
+    let content = content_for_print(
+        compose_printer_test_sample_receipt(cfg.print_qr_on_receipt),
+        cfg.print_qr_on_receipt,
+    );
+    let qr = qr_png_for_settings(state.pool(), &cfg, 451_000.0).await?;
+    crate::printer::print_receipt_to_target(target, &content, qr.as_deref())?;
     Ok(format!("Đã kiểm tra thành công máy in: {target}"))
 }
 
@@ -1576,23 +1602,12 @@ pub async fn print_temporary_bill(
     let target = resolve_printer_target(printer_name_or_ip)?;
     crate::printer::check_printer_target_connection(&target)?;
     let cfg = qr_settings.unwrap_or_default();
-    let mut content = compose_temporary_bill(&data);
-    if !cfg.print_qr_on_receipt {
-        content = crate::printer::strip_bill_qr_marker(&content);
-    }
-    let qr = if cfg.print_qr_on_receipt {
-        let base_qr =
-            resolve_selected_qr_code(state.pool(), cfg.selected_qr_thanh_toan_id).await?;
-        let amount = if cfg.qr_use_fixed_amount {
-            cfg.qr_fixed_amount_vnd as f64
-        } else {
-            data.tong_tam_tinh
-        };
-        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
-    } else {
-        None
-    };
-    crate::printer::print_receipt_to_target(&target, &content, qr.as_ref().map(|b| b.as_slice()))?;
+    let content = content_for_print(
+        compose_temporary_bill(&data, cfg.print_qr_on_receipt),
+        cfg.print_qr_on_receipt,
+    );
+    let qr = qr_png_for_settings(state.pool(), &cfg, data.tong_tam_tinh).await?;
+    crate::printer::print_receipt_to_target(&target, &content, qr.as_deref())?;
     Ok("Đã in phiếu tạm tính.".to_string())
 }
 
@@ -1640,37 +1655,27 @@ pub async fn reprint_history_bill(
 
     let tong_thanh_toan = sqlite_f64(&bill, "tong_tien_thanh_toan")?;
     let cfg = qr_settings.unwrap_or_default();
-    let mut content = compose_receipt_bill(
-        history_id,
-        &bill.try_get::<String, _>("ten_phong")
-            .map_err(|e| e.to_string())?,
-        &bill.try_get::<String, _>("gio_bat_dau")
-            .map_err(|e| e.to_string())?,
-        &bill
-            .try_get::<Option<String>, _>("gio_ket_thuc")
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "--".to_string()),
-        &items,
-        sqlite_f64(&bill, "tong_tien_san_pham")?,
-        sqlite_f64(&bill, "tong_tien_gio")?,
-        tong_thanh_toan,
+    let content = content_for_print(
+        compose_receipt_bill(
+            history_id,
+            &bill.try_get::<String, _>("ten_phong")
+                .map_err(|e| e.to_string())?,
+            &bill.try_get::<String, _>("gio_bat_dau")
+                .map_err(|e| e.to_string())?,
+            &bill
+                .try_get::<Option<String>, _>("gio_ket_thuc")
+                .map_err(|e| e.to_string())?
+                .unwrap_or_else(|| "--".to_string()),
+            &items,
+            sqlite_f64(&bill, "tong_tien_san_pham")?,
+            sqlite_f64(&bill, "tong_tien_gio")?,
+            tong_thanh_toan,
+            cfg.print_qr_on_receipt,
+        ),
+        cfg.print_qr_on_receipt,
     );
-    if !cfg.print_qr_on_receipt {
-        content = crate::printer::strip_bill_qr_marker(&content);
-    }
-    let qr = if cfg.print_qr_on_receipt {
-        let base_qr =
-            resolve_selected_qr_code(pool, cfg.selected_qr_thanh_toan_id).await?;
-        let amount = if cfg.qr_use_fixed_amount {
-            cfg.qr_fixed_amount_vnd as f64
-        } else {
-            tong_thanh_toan
-        };
-        crate::bill_qr::qr_png_for_bill_from_base(&base_qr, amount).ok()
-    } else {
-        None
-    };
-    crate::printer::print_receipt_to_target(&address, &content, qr.as_ref().map(|b| b.as_slice()))?;
+    let qr = qr_png_for_settings(pool, &cfg, tong_thanh_toan).await?;
+    crate::printer::print_receipt_to_target(&address, &content, qr.as_deref())?;
     Ok(format!("Đã in lại hóa đơn #{history_id}"))
 }
 

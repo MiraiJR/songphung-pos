@@ -56,6 +56,10 @@ export function PrinterSettingsPage({
   const qrSettingsPayload = useMemo(() => {
     const fixedAmountVnd = Number(qrFixedAmountDisplay.replace(/\D/g, "") || "0");
     return {
+      printQrOnReceipt: printBillQr,
+      qrUseFixedAmount: qrUseFixedAmount,
+      qrFixedAmountVnd: Number.isFinite(fixedAmountVnd) ? Math.max(0, Math.floor(fixedAmountVnd)) : 0,
+      selectedQrThanhToanId: selectedQrThanhToanId,
       print_qr_on_receipt: printBillQr,
       qr_use_fixed_amount: qrUseFixedAmount,
       qr_fixed_amount_vnd: Number.isFinite(fixedAmountVnd) ? Math.max(0, Math.floor(fixedAmountVnd)) : 0,
@@ -111,7 +115,7 @@ export function PrinterSettingsPage({
         return;
       }
       const url = await invoke<string | null>("get_bill_qr_preview_data_url", {
-        qr_settings: qrSettingsPayload,
+        qrSettings: qrSettingsPayload,
       });
       setBillQrDataUrl(url ?? "");
     } catch {
@@ -157,10 +161,15 @@ export function PrinterSettingsPage({
     return systemPrinters.includes(inputValue) ? "SYSTEM" : "CUSTOM";
   }, [systemPrinters, inputValue]);
 
-  const receiptPreviewDisplay = useMemo(
-    () => receiptPreview.replace(/^\s*@@BILL_QR@@\s*$/m, "      [mã QR — ảnh bên dưới]"),
-    [receiptPreview],
-  );
+  const receiptPreviewDisplay = useMemo(() => {
+    if (!printBillQr) {
+      return receiptPreview
+        .split("\n")
+        .filter((line) => line.trim() !== "@@BILL_QR@@")
+        .join("\n");
+    }
+    return receiptPreview.replace(/^\s*@@BILL_QR@@\s*$/m, "      [mã QR — ảnh bên dưới]");
+  }, [receiptPreview, printBillQr]);
 
   async function testAndSave() {
     const target = inputValue.trim();
@@ -173,7 +182,7 @@ export function PrinterSettingsPage({
     try {
       const message = await invoke<string>("test_printer", {
         printerNameOrIp: target,
-        qr_settings: qrSettingsPayload,
+        qrSettings: qrSettingsPayload,
       });
       onChangePrinterTarget(target);
       setStatus({ type: "ok", message });

@@ -30,6 +30,10 @@ const LS_QR_FIXED_AMOUNT = "songphung_qr_fixed_amount";
 const LS_QR_SELECTED_ID = "songphung_qr_selected_id";
 
 type BillQrSettings = {
+  printQrOnReceipt: boolean;
+  qrUseFixedAmount: boolean;
+  qrFixedAmountVnd: number;
+  selectedQrThanhToanId: number | null;
   print_qr_on_receipt: boolean;
   qr_use_fixed_amount: boolean;
   qr_fixed_amount_vnd: number;
@@ -47,6 +51,10 @@ function buildQrSettingsForRealBill(input: {
   selectedQrThanhToanId: number | null;
 }): BillQrSettings {
   return {
+    printQrOnReceipt: input.printQrOnReceipt,
+    qrUseFixedAmount: false,
+    qrFixedAmountVnd: 0,
+    selectedQrThanhToanId: input.selectedQrThanhToanId,
     print_qr_on_receipt: input.printQrOnReceipt,
     qr_use_fixed_amount: false,
     qr_fixed_amount_vnd: 0,
@@ -273,22 +281,22 @@ function AppShell() {
     try {
       await invoke("print_temporary_bill", {
         data: {
-          room_name: s.ten_phong,
-          gio_bat_dau: s.gio_bat_dau,
-          gio_hien_tai,
-          lich_su_phong_id: s.lich_su_phong_id,
+          roomName: s.ten_phong,
+          gioBatDau: s.gio_bat_dau,
+          gioHienTai: gio_hien_tai,
+          lichSuPhongId: s.lich_su_phong_id,
           items: s.items.map((row) => ({
-            ten_san_pham: row.ten_san_pham,
-            so_luong: row.so_luong,
-            don_gia: row.don_gia,
-            thanh_tien: row.thanh_tien,
+            tenSanPham: row.ten_san_pham,
+            soLuong: row.so_luong,
+            donGia: row.don_gia,
+            thanhTien: row.thanh_tien,
           })),
-          tong_tien_san_pham: s.tong_tien_san_pham,
-          tong_tien_gio: s.tong_tien_gio,
-          tong_tam_tinh: s.tong_tien_thanh_toan,
+          tongTienSanPham: s.tong_tien_san_pham,
+          tongTienGio: s.tong_tien_gio,
+          tongTamTinh: s.tong_tien_thanh_toan,
         },
-        printer_name_or_ip: printerTarget.trim() ? printerTarget.trim() : null,
-        qr_settings: buildQrSettingsForRealBill({
+        printerNameOrIp: printerTarget.trim() ? printerTarget.trim() : null,
+        qrSettings: buildQrSettingsForRealBill({
           printQrOnReceipt: printBillQr,
           selectedQrThanhToanId: temporaryBillSelectedQrId,
         }),
@@ -950,7 +958,7 @@ function AppShell() {
                 return invoke<string>("reprint_history_bill", {
                   historyId,
                   printerAddr: printerTarget || null,
-                  qr_settings: buildQrSettingsForRealBill({
+                  qrSettings: buildQrSettingsForRealBill({
                     printQrOnReceipt: printBillQr,
                     selectedQrThanhToanId: selectedQrId,
                   }),
