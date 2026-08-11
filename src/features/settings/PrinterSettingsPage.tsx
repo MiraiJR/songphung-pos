@@ -308,38 +308,44 @@ export function PrinterSettingsPage({
         <div className="app-card w-full p-4">
           <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
-              <p className="mb-2 text-sm font-semibold text-slate-700">Tùy chọn in QR</p>
-              <label className="mb-2 flex items-center gap-2 text-sm">
+              <p className="mb-2 text-sm font-semibold text-slate-700">Sử dụng mã QR</p>
+              <label className="mb-1 flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={printBillQr}
                   onCheckedChange={(checked) => onPrintBillQrChange(checked === true)}
                 />
-                In QR trên bill
+                Bật mã QR trên hóa đơn
               </label>
-              <label className={`mb-2 flex items-center gap-2 text-sm ${printBillQr ? "" : "text-slate-400"}`}>
-                <Checkbox
-                  checked={qrUseFixedAmount}
-                  disabled={!printBillQr}
-                  onCheckedChange={(checked) => onQrUseFixedAmountChange(checked === true)}
-                />
-                Dùng số tiền cố định trên QR (test)
-              </label>
-              <div className={`${printBillQr && qrUseFixedAmount ? "" : "opacity-50"}`}>
-                <label className="mb-1 block text-xs text-slate-500">Số tiền cố định (VNĐ)</label>
-                <input
-                  className="app-input w-full text-right"
-                  value={qrFixedAmountDisplay}
-                  onChange={(e) => onQrFixedAmountDisplayChange(e.target.value)}
-                  placeholder="VD: 150000"
-                  disabled={!printBillQr || !qrUseFixedAmount}
-                />
+              <p className="mb-3 text-xs text-slate-500">
+                Khi tắt, mọi phiếu in (thanh toán, tạm tính, in lại) sẽ không kèm mã QR.
+              </p>
+              <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
+                <label className="mb-2 flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={qrUseFixedAmount}
+                    disabled={!printBillQr}
+                    onCheckedChange={(checked) => onQrUseFixedAmountChange(checked === true)}
+                  />
+                  Dùng số tiền cố định trên QR (test)
+                </label>
+                <div className={`${qrUseFixedAmount ? "" : "opacity-50"}`}>
+                  <label className="mb-1 block text-xs text-slate-500">Số tiền cố định (VNĐ)</label>
+                  <input
+                    className="app-input w-full text-right"
+                    value={qrFixedAmountDisplay}
+                    onChange={(e) => onQrFixedAmountDisplayChange(e.target.value)}
+                    placeholder="VD: 150000"
+                    disabled={!printBillQr || !qrUseFixedAmount}
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
+            <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
               <label className="mb-1 block text-xs text-slate-500">Chọn QR mặc định để in bill</label>
               <Select
                 value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
+                disabled={!printBillQr}
                 onChange={(e) => {
                   const id = Number(e.target.value);
                   onSelectedQrThanhToanIdChange(Number.isFinite(id) && id > 0 ? id : null);
@@ -359,6 +365,11 @@ export function PrinterSettingsPage({
                   </p>
                   <img src={billQrDataUrl} alt="Preview QR đang chọn" className="mx-auto max-h-40 w-auto object-contain" />
                 </div>
+              )}
+              {!printBillQr && (
+                <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Đã tắt sử dụng mã QR. Bật lại để in QR trên hóa đơn.
+                </p>
               )}
             </div>
           </div>

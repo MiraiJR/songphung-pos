@@ -655,34 +655,30 @@ function AppShell() {
                         />
                         In hóa đơn
                       </label>
-                      {checkoutPrintReceipt && (
+                      {checkoutPrintReceipt && printBillQr && (
                         <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
                           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
-                          <label className="mb-2 flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={printBillQr}
-                              onCheckedChange={(checked) => persistQrPrint(checked === true)}
-                            />
-                            In mã QR
-                          </label>
-                          <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
-                            <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
-                            <Select
-                              value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
-                              onChange={(e) => {
-                                const id = Number(e.target.value);
-                                persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
-                              }}
-                            >
-                              <option value="">-- Chọn QR --</option>
-                              {qrThanhToanList.map((item) => (
-                                <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                                  {item.qr_thanh_toan_ten}
-                                </option>
-                              ))}
-                            </Select>
-                          </div>
+                          <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
+                          <Select
+                            value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
+                            onChange={(e) => {
+                              const id = Number(e.target.value);
+                              persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                            }}
+                          >
+                            <option value="">-- Chọn QR --</option>
+                            {qrThanhToanList.map((item) => (
+                              <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
+                                {item.qr_thanh_toan_ten}
+                              </option>
+                            ))}
+                          </Select>
                         </div>
+                      )}
+                      {checkoutPrintReceipt && !printBillQr && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Đã tắt mã QR trong Cài đặt. Hóa đơn sẽ in không kèm QR.
+                        </p>
                       )}
                       {checkoutPrintReceipt && (
                         <div
@@ -737,16 +733,9 @@ function AppShell() {
                           <span className="text-slate-500">Giờ hiện tại:</span> {temporaryBillNow}
                         </div>
                       </div>
-                      <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
-                        <label className="mb-2 flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={printBillQr}
-                            onCheckedChange={(checked) => persistQrPrint(checked === true)}
-                          />
-                          In mã QR
-                        </label>
-                        <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
+                      {printBillQr ? (
+                        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
                           <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
                           <Select
                             value={temporaryBillSelectedQrId != null ? String(temporaryBillSelectedQrId) : ""}
@@ -765,7 +754,11 @@ function AppShell() {
                             ))}
                           </Select>
                         </div>
-                      </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-slate-500">
+                          Đã tắt mã QR trong Cài đặt. Phiếu tạm tính sẽ in không kèm QR.
+                        </p>
+                      )}
                     </>
                   }
                   rightContent={
@@ -907,6 +900,7 @@ function AppShell() {
                 qr_thanh_toan_ten: item.qr_thanh_toan_ten,
               }))}
               defaultSelectedQrThanhToanId={selectedQrThanhToanId}
+              printBillQr={printBillQr}
               onDeleteByIds={async (ids) => {
                 return invoke<number>("delete_history_by_ids", { ids });
               }}

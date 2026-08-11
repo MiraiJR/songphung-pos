@@ -32,6 +32,7 @@ type Props = {
   onReprintBill: (historyId: number, selectedQrThanhToanId: number | null) => Promise<string>;
   qrThanhToanOptions: Array<{ qr_thanh_toan_id: number; qr_thanh_toan_ten: string }>;
   defaultSelectedQrThanhToanId: number | null;
+  printBillQr: boolean;
   onDeleteByIds: (ids: number[]) => Promise<number>;
   onDeleteByRange: (startDate: string, endDate: string) => Promise<number>;
   onUpdateBill: (
@@ -90,6 +91,7 @@ export function HistoryPage({
   onReprintBill,
   qrThanhToanOptions,
   defaultSelectedQrThanhToanId,
+  printBillQr,
   onDeleteByIds,
   onDeleteByRange,
   onUpdateBill,
@@ -176,7 +178,7 @@ export function HistoryPage({
   }
 
   useEffect(() => {
-    if (!reprintConfirmOpen || reprintSelectedQrId == null) {
+    if (!reprintConfirmOpen || !printBillQr || reprintSelectedQrId == null) {
       setReprintQrPreviewUrl("");
       return;
     }
@@ -190,7 +192,7 @@ export function HistoryPage({
         setReprintQrPreviewUrl("");
       }
     })();
-  }, [reprintConfirmOpen, reprintSelectedQrId]);
+  }, [reprintConfirmOpen, printBillQr, reprintSelectedQrId]);
 
   useEffect(() => {
     if (!editOpen || !editingHistory) return;
@@ -581,23 +583,29 @@ export function HistoryPage({
                 Bạn có muốn in lại hóa đơn <span className="font-semibold">#{reprintTarget.lich_su_phong_id}</span> của
                 phòng <span className="font-semibold">{reprintTarget.ten_phong}</span> không?
               </p>
-              <div className="mt-3">
-                <label className="mb-1 block text-sm text-slate-600">Chọn QR in lại</label>
-                <Select
-                  value={reprintSelectedQrId != null ? String(reprintSelectedQrId) : ""}
-                  onChange={(e) => {
-                    const id = Number(e.target.value);
-                    setReprintSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
-                  }}
-                >
-                  <option value="">-- Chọn QR --</option>
-                  {qrThanhToanOptions.map((item) => (
-                    <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                      {item.qr_thanh_toan_ten}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {printBillQr ? (
+                <div className="mt-3">
+                  <label className="mb-1 block text-sm text-slate-600">Chọn QR in lại</label>
+                  <Select
+                    value={reprintSelectedQrId != null ? String(reprintSelectedQrId) : ""}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      setReprintSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                    }}
+                  >
+                    <option value="">-- Chọn QR --</option>
+                    {qrThanhToanOptions.map((item) => (
+                      <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
+                        {item.qr_thanh_toan_ten}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-slate-500">
+                  Đã tắt mã QR trong Cài đặt. Hóa đơn in lại sẽ không kèm QR.
+                </p>
+              )}
               <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                 Tổng tiền: <span className="font-semibold">{Math.round(reprintTarget.tong_tien_thanh_toan).toLocaleString()}</span>
               </div>
@@ -620,7 +628,7 @@ export function HistoryPage({
               productTotal={reprintTarget.tong_tien_san_pham}
               hourTotal={reprintTarget.tong_tien_gio}
               grandTotal={reprintTarget.tong_tien_thanh_toan}
-              qrDataUrl={reprintQrPreviewUrl}
+              qrDataUrl={printBillQr ? reprintQrPreviewUrl : ""}
             />
           }
         />
