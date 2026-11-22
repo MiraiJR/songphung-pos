@@ -59,6 +59,7 @@ export type PaidHistory = {
   gio_ket_thuc: string | null;
   tong_tien_san_pham: number;
   tong_tien_gio: number;
+  phu_thu: number;
   tong_tien_thanh_toan: number;
 };
 

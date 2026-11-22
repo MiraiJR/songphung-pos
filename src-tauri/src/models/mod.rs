@@ -35,6 +35,7 @@ pub struct LichSuPhong {
     pub tong_tien_san_pham: f64,
     pub tong_tien_gio: f64,
     pub tong_tien_thanh_toan: f64,
+    pub phu_thu: f64,
     pub trang_thai: String,
 }
 

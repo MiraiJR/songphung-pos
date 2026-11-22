@@ -33,6 +33,7 @@ import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
 import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
 import type { HistoryOrderItem, PaidHistory, Product } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
+import { roundUpMoney } from "@/utils/roundMoney";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -49,6 +50,7 @@ interface HistoryRow extends Record<string, unknown> {
   gio_ket_thuc: string | null;
   tong_tien_san_pham: number;
   tong_tien_gio: number;
+  phu_thu: number;
   tong_tien_thanh_toan: number;
 }
 
@@ -70,6 +72,7 @@ type Props = {
   onUpdateBill: (
     historyId: number,
     tongTienGio: number,
+    phuThu: number,
     tongTienThanhToan: number,
     items: Array<{ san_pham_id: string; so_luong: number }>,
   ) => Promise<string>;
@@ -166,6 +169,7 @@ export function HistoryPage({
   const [editOpen, setEditOpen] = useState(false);
   const [editingHistory, setEditingHistory] = useState<PaidHistory | null>(null);
   const [editTienGio, setEditTienGio] = useState("0");
+  const [editPhuThu, setEditPhuThu] = useState("0");
   const [editTongTien, setEditTongTien] = useState("0");
   const [editQtyByProductId, setEditQtyByProductId] = useState<Record<string, string>>({});
   const [editLines, setEditLines] = useState<Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>>([]);
@@ -204,6 +208,7 @@ export function HistoryPage({
         gio_ket_thuc: h.gio_ket_thuc,
         tong_tien_san_pham: h.tong_tien_san_pham,
         tong_tien_gio: h.tong_tien_gio,
+        phu_thu: h.phu_thu ?? 0,
         tong_tien_thanh_toan: h.tong_tien_thanh_toan,
       })),
     [filteredHistories],
@@ -331,6 +336,7 @@ export function HistoryPage({
       await onOpenDetail(item.lich_su_phong_id);
       setEditingHistory(item);
       setEditTienGio(formatMoneyInput(String(Math.round(item.tong_tien_gio))));
+      setEditPhuThu(formatMoneyInput(String(Math.round(item.phu_thu ?? 0))));
       setEditTongTien(formatMoneyInput(String(Math.round(item.tong_tien_thanh_toan))));
       setEditQtyByProductId({});
       setEditLines([]);
@@ -377,6 +383,7 @@ export function HistoryPage({
     nextLines: Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>,
     nextQty: Record<string, string>,
     nextHourRaw: string,
+    nextSurchargeRaw: string,
   ) {
     const productsTotal = nextLines.reduce((sum, item) => {
       const qty = Number(nextQty[item.san_pham_id] ?? 0);
@@ -384,7 +391,9 @@ export function HistoryPage({
     }, 0);
     const hour = parseMoneyInput(nextHourRaw);
     const hourSafe = Number.isFinite(hour) && hour >= 0 ? hour : 0;
-    setEditTongTien(formatMoneyInput(String(Math.round(productsTotal + hourSafe))));
+    const surcharge = parseMoneyInput(nextSurchargeRaw);
+    const surchargeSafe = Number.isFinite(surcharge) && surcharge >= 0 ? surcharge : 0;
+    setEditTongTien(formatMoneyInput(String(Math.round(productsTotal + hourSafe + surchargeSafe))));
   }
 
   async function handleSaveEdit() {
@@ -392,6 +401,11 @@ export function HistoryPage({
     const tongTienGio = parseMoneyInput(editTienGio);
     if (!Number.isFinite(tongTienGio) || tongTienGio < 0) {
       showToast({ body: "Tiền giờ không hợp lệ.", type: "error" });
+      return;
+    }
+    const phuThu = parseMoneyInput(editPhuThu || "0");
+    if (!Number.isFinite(phuThu) || phuThu < 0) {
+      showToast({ body: "Phụ thu không hợp lệ.", type: "error" });
       return;
     }
     const tongTienThanhToan = parseMoneyInput(editTongTien);
@@ -426,6 +440,7 @@ export function HistoryPage({
       const message = await onUpdateBill(
         editingHistory.lich_su_phong_id,
         tongTienGio,
+        phuThu,
         tongTienThanhToan,
         payloadItems,
       );
@@ -448,6 +463,7 @@ export function HistoryPage({
           ? {
               ...prev,
               tong_tien_gio: tongTienGio,
+              phu_thu: phuThu,
               tong_tien_san_pham: tongTienSanPhamMoi,
               tong_tien_thanh_toan: tongTienThanhToan,
             }
@@ -524,6 +540,15 @@ export function HistoryPage({
       align: "end",
       renderCell: (row) => (
         <Text hasTabularNumbers>{Math.round(row.tong_tien_gio).toLocaleString("vi-VN")}</Text>
+      ),
+    },
+    {
+      key: "phu_thu",
+      header: "Phụ thu",
+      width: proportional(1),
+      align: "end",
+      renderCell: (row) => (
+        <Text hasTabularNumbers>{Math.round(row.phu_thu ?? 0).toLocaleString("vi-VN")}</Text>
       ),
     },
     {
@@ -788,7 +813,6 @@ export function HistoryPage({
               roomName={reprintTarget.ten_phong}
               startedAt={formatDateTime(reprintTarget.gio_bat_dau)}
               endedAt={formatDateTime(reprintTarget.gio_ket_thuc)}
-              billNumber={reprintTarget.lich_su_phong_id}
               items={historyItems.map((item) => ({
                 id: `reprint-pv-${item.san_pham_id}`,
                 name: item.ten_san_pham,
@@ -798,6 +822,7 @@ export function HistoryPage({
               }))}
               productTotal={reprintTarget.tong_tien_san_pham}
               hourTotal={reprintTarget.tong_tien_gio}
+              surchargeTotal={reprintTarget.phu_thu ?? 0}
               grandTotal={reprintTarget.tong_tien_thanh_toan}
               qrDataUrl={printBillQr ? reprintQrPreviewUrl : ""}
             />
@@ -812,7 +837,7 @@ export function HistoryPage({
           onOpenChange={(next) => {
             if (!next) setDetailOpen(false);
           }}
-          width={760}
+          width={860}
           purpose="info"
           padding={0}
         >
@@ -829,7 +854,6 @@ export function HistoryPage({
                 roomName={selectedHistory.ten_phong}
                 startedAt={formatDateTime(selectedHistory.gio_bat_dau)}
                 endedAt={formatDateTime(selectedHistory.gio_ket_thuc)}
-                billNumber={selectedHistory.lich_su_phong_id}
                 items={historyItems.map((item) => ({
                   id: `detail-pv-${item.san_pham_id}`,
                   name: item.ten_san_pham,
@@ -839,6 +863,7 @@ export function HistoryPage({
                 }))}
                 productTotal={selectedHistory.tong_tien_san_pham}
                 hourTotal={selectedHistory.tong_tien_gio}
+                surchargeTotal={selectedHistory.phu_thu ?? 0}
                 grandTotal={selectedHistory.tong_tien_thanh_toan}
                 qrDataUrl=""
                 size="large"
@@ -875,7 +900,7 @@ export function HistoryPage({
           <VStack>
             <DialogHeader
               title={`Chỉnh sửa hóa đơn #${editingHistory.lich_su_phong_id}`}
-              subtitle="Sửa tiền giờ, số lượng, thêm món hoặc gỡ món khỏi hóa đơn đã thanh toán."
+              subtitle="Sửa tiền giờ, phụ thu, số lượng, thêm món hoặc gỡ món khỏi hóa đơn đã thanh toán."
               onOpenChange={(next) => {
                 if (!next && !savingEdit) setEditOpen(false);
               }}
@@ -884,7 +909,7 @@ export function HistoryPage({
             <HStack gap={4} padding={5} wrap="wrap" vAlign="start" isScrollable>
               {/* ---- Left: edit form ---- */}
               <VStack gap={3} width="100%" style={{ flex: 1, minWidth: "24rem" }}>
-                {/* Money inputs + room info */}
+                {/* Money inputs */}
                 <Card variant="muted" padding={3}>
                   <HStack gap={3} wrap="wrap" vAlign="end">
                     <TextInput
@@ -893,7 +918,19 @@ export function HistoryPage({
                       onChange={(v) => {
                         const nextHour = formatMoneyInput(v);
                         setEditTienGio(nextHour);
-                        recalcEditTotal(editLines, editQtyByProductId, nextHour);
+                        recalcEditTotal(editLines, editQtyByProductId, nextHour, editPhuThu);
+                      }}
+                      inputMode="numeric"
+                      isDisabled={savingEdit}
+                      width={180}
+                    />
+                    <TextInput
+                      label="Phụ thu"
+                      value={editPhuThu}
+                      onChange={(v) => {
+                        const nextSurcharge = formatMoneyInput(v);
+                        setEditPhuThu(nextSurcharge);
+                        recalcEditTotal(editLines, editQtyByProductId, editTienGio, nextSurcharge);
                       }}
                       inputMode="numeric"
                       isDisabled={savingEdit}
@@ -902,22 +939,29 @@ export function HistoryPage({
                     <TextInput
                       label="Tổng tiền"
                       value={editTongTien}
-                      onChange={(v) => setEditTongTien(formatMoneyInput(v))}
+                      onChange={() => {}}
                       inputMode="numeric"
-                      isDisabled={savingEdit}
+                      isDisabled
                       width={180}
                     />
-                    <VStack gap={0.5} style={{ flex: 1 }}>
-                      <Text type="supporting" color="secondary">
-                        Phòng: <Text weight="bold">{editingHistory.ten_phong}</Text>
-                      </Text>
-                      <Text type="supporting" color="secondary">
-                        Giờ vào: {formatDateTime(editingHistory.gio_bat_dau)}
-                      </Text>
-                      <Text type="supporting" color="secondary">
-                        Giờ ra: {formatDateTime(editingHistory.gio_ket_thuc)}
-                      </Text>
-                    </VStack>
+                    <Button
+                      label="Làm tròn"
+                      variant="secondary"
+                      isDisabled={savingEdit}
+                      onClick={() => {
+                        const hour = parseMoneyInput(editTienGio || "0");
+                        const surcharge = parseMoneyInput(editPhuThu || "0");
+                        const hourSafe = Number.isFinite(hour) && hour >= 0 ? hour : 0;
+                        const surchargeSafe = Number.isFinite(surcharge) && surcharge >= 0 ? surcharge : 0;
+                        const total = editTongTienMon + hourSafe + surchargeSafe;
+                        const rounded = roundUpMoney(total);
+                        const delta = rounded - total;
+                        if (delta <= 0) return;
+                        const nextHour = formatMoneyInput(String(Math.round(hourSafe + delta)));
+                        setEditTienGio(nextHour);
+                        setEditTongTien(formatMoneyInput(String(rounded)));
+                      }}
+                    />
                   </HStack>
                 </Card>
 
@@ -957,7 +1001,7 @@ export function HistoryPage({
                               onChange={(v) => {
                                 const nextQty = { ...editQtyByProductId, [item.san_pham_id]: v };
                                 setEditQtyByProductId(nextQty);
-                                recalcEditTotal(editLines, nextQty, editTienGio);
+                                recalcEditTotal(editLines, nextQty, editTienGio, editPhuThu);
                               }}
                               inputMode="numeric"
                               isDisabled={savingEdit}
@@ -998,7 +1042,7 @@ export function HistoryPage({
                                 }
                                 setEditLines(nextLines);
                                 setEditQtyByProductId(nextQty);
-                                recalcEditTotal(nextLines, nextQty, editTienGio);
+                                recalcEditTotal(nextLines, nextQty, editTienGio, editPhuThu);
                               }}
                             />
                           </HStack>
@@ -1062,7 +1106,7 @@ export function HistoryPage({
                                 current.filter((id) => id !== product.san_pham_id),
                               );
                               setEditProductKeyword("");
-                              recalcEditTotal(nextLines, nextQty, editTienGio);
+                              recalcEditTotal(nextLines, nextQty, editTienGio, editPhuThu);
                             }}
                           />
                         </HStack>
@@ -1091,14 +1135,13 @@ export function HistoryPage({
               </VStack>
 
               {/* ---- Right: bill preview ---- */}
-              <VStack gap={2} width={320}>
+              <VStack gap={2} width={480}>
                 <Heading level={4}>Xem Trước Hóa Đơn</Heading>
                 <BillTemplatePreview
                   title="PHIẾU THANH TOÁN"
                   roomName={editingHistory.ten_phong}
                   startedAt={formatDateTime(editingHistory.gio_bat_dau)}
                   endedAt={formatDateTime(editingHistory.gio_ket_thuc)}
-                  billNumber={editingHistory.lich_su_phong_id}
                   items={editLines.map((item) => {
                     const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
                     const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
@@ -1112,6 +1155,7 @@ export function HistoryPage({
                   })}
                   productTotal={editTongTienMon}
                   hourTotal={parseMoneyInput(editTienGio || "0")}
+                  surchargeTotal={parseMoneyInput(editPhuThu || "0") || 0}
                   grandTotal={parseMoneyInput(editTongTien || "0")}
                   qrDataUrl=""
                 />

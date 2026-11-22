@@ -15,10 +15,10 @@ type Props = {
   roomName?: string;
   startedAt?: string;
   endedAt?: string;
-  billNumber?: number;
   items: PreviewItem[];
   productTotal: number;
   hourTotal: number;
+  surchargeTotal?: number;
   grandTotal: number;
   qrDataUrl?: string;
   /** `large` phóng phiếu xem trên màn hình. Mặc định giữ khổ in 80mm. */
@@ -30,10 +30,10 @@ export function BillTemplatePreview({
   roomName,
   startedAt,
   endedAt,
-  billNumber,
   items,
   productTotal,
   hourTotal,
+  surchargeTotal = 0,
   grandTotal,
   qrDataUrl,
   size = "receipt",
@@ -47,8 +47,8 @@ export function BillTemplatePreview({
         <div
           className={
             size === "large"
-              ? "app-bill-preview-large mx-auto w-full max-w-[80mm] overflow-hidden rounded border border-slate-200 bg-white p-3 font-mono text-[12px] shadow-sm"
-              : "mx-auto w-full max-w-[80mm] overflow-hidden rounded border border-slate-200 bg-white p-3 font-mono text-[12px] shadow-sm"
+              ? "app-bill-preview-large mx-auto w-[440px] max-w-full rounded border border-slate-200 bg-white p-3 font-mono text-[12px] shadow-sm"
+              : "mx-auto w-full max-w-[92mm] rounded border border-slate-200 bg-white p-3 font-mono text-[12px] shadow-sm"
           }
         >
           <div className="text-center text-[11px] font-bold">KARAOKE SONG PHỤNG 2</div>
@@ -63,12 +63,9 @@ export function BillTemplatePreview({
           )}
           {startedAt && <div className="text-center text-[10px]">Bắt đầu: {startedAt}</div>}
           {endedAt && <div className="text-center text-[10px]">Kết thúc: {endedAt}</div>}
-          <div className="flex justify-between text-[10px]">
-            <span>Nhân viên: Admin</span>
-            <span>Số HĐ: {String(billNumber ?? 0).padStart(5, "0")}</span>
-          </div>
+          <div className="text-[10px]">Nhân viên: Admin</div>
           <div className="mt-1 border-y border-dashed border-slate-300 py-1">
-            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4rem] gap-1 text-[10px] font-semibold">
+            <div className="grid grid-cols-[minmax(0,1.3fr)_2.75rem_5.5rem_6rem] gap-2 text-[10px] font-semibold">
               <span>Mặt hàng</span>
               <span className="text-right">SL</span>
               <span className="text-right">Đ.GIÁ</span>
@@ -78,7 +75,7 @@ export function BillTemplatePreview({
             {items.map((item) => (
               <div
                 key={item.id}
-                className="grid grid-cols-[minmax(0,1fr)_2.5rem_3.5rem_4rem] gap-1 text-[11px]"
+                className="grid grid-cols-[minmax(0,1.3fr)_2.75rem_5.5rem_6rem] gap-2 text-[11px]"
               >
                 <span className="break-words whitespace-normal leading-4">{item.name}</span>
                 <span className="text-right tabular-nums">{Math.round(item.qty).toLocaleString()}</span>
@@ -100,6 +97,12 @@ export function BillTemplatePreview({
               <span>TIỀN GIỜ</span>
               <span className="tabular-nums">{Math.round(hourTotal).toLocaleString()}</span>
             </div>
+            {surchargeTotal > 0 ? (
+              <div className="flex justify-between gap-2">
+                <span>PHỤ THU</span>
+                <span className="tabular-nums">{Math.round(surchargeTotal).toLocaleString()}</span>
+              </div>
+            ) : null}
             <div className="mt-1 flex justify-between gap-2 border-t border-dashed border-slate-300 pt-1 text-sm font-bold">
               <span>TIỀN MẶT (đ):</span>
               <span className="tabular-nums">{Math.round(grandTotal).toLocaleString()}</span>

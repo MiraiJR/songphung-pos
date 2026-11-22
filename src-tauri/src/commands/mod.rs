@@ -63,6 +63,7 @@ pub struct PaidHistory {
     pub tong_tien_san_pham: f64,
     pub tong_tien_gio: f64,
     pub tong_tien_thanh_toan: f64,
+    pub phu_thu: f64,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -140,6 +141,8 @@ pub struct CheckoutPayload {
     pub room_id: i64,
     #[serde(alias = "hourAmount")]
     pub hour_amount: Option<f64>,
+    #[serde(default, alias = "surchargeAmount")]
+    pub surcharge_amount: Option<f64>,
     #[serde(alias = "finalAmount")]
     pub final_amount: f64,
     #[serde(alias = "printReceipt")]
@@ -224,6 +227,7 @@ pub struct UpdateHistoryOrderItemQtyPayload {
 pub struct UpdatePaidHistoryBillPayload {
     pub history_id: i64,
     pub tong_tien_gio: f64,
+    pub phu_thu: f64,
     pub tong_tien_thanh_toan: f64,
     pub items: Vec<UpdateHistoryOrderItemQtyPayload>,
 }
@@ -429,13 +433,14 @@ fn format_currency(value: f64) -> String {
 }
 
 fn compose_receipt_bill(
-    history_id: i64,
+    _history_id: i64,
     room_name: &str,
     started_at: &str,
     ended_at: &str,
     items: &[HistoryOrderItem],
     total_product: f64,
     total_hour: f64,
+    surcharge: f64,
     total_paid: f64,
     include_qr: bool,
 ) -> String {
@@ -460,10 +465,7 @@ fn compose_receipt_bill(
         "Kết thúc: {}",
         format_datetime_receipt(ended_at)
     )));
-    content.push_str(&rf::line_two_cols(
-        "Nhân viên: Admin",
-        &format!("Số HĐ: {:05}", history_id),
-    ));
+    content.push_str("Nhân viên: Admin\n");
     content.push_str(&rf::line_sep());
     content.push_str(&rf::line_item_header());
     for item in items {
@@ -480,6 +482,9 @@ fn compose_receipt_bill(
         &format_currency(total_product),
     ));
     content.push_str(&rf::line_total("TIỀN GIỜ:", &format_currency(total_hour)));
+    if surcharge > 0.0 {
+        content.push_str(&rf::line_total("PHỤ THU:", &format_currency(surcharge)));
+    }
     content.push_str(&rf::line_total(
         "TIỀN MẶT (đ):",
         &format_currency(total_paid),
@@ -518,10 +523,7 @@ fn compose_temporary_bill(data: &TemporaryBillData, include_qr: bool) -> String 
         "Kết thúc: {}",
         format_datetime_receipt(&data.gio_hien_tai)
     )));
-    content.push_str(&rf::line_two_cols(
-        "Nhân viên: Admin",
-        &format!("Số HĐ: {:05}", data.lich_su_phong_id),
-    ));
+    content.push_str("Nhân viên: Admin\n");
     content.push_str(&rf::line_sep());
     content.push_str(&rf::line_item_header());
     for item in &data.items {
@@ -589,6 +591,7 @@ fn compose_printer_test_sample_receipt(include_qr: bool) -> String {
         &items,
         206_000.0,
         245_000.0,
+        0.0,
         451_000.0,
         include_qr,
     )
@@ -1337,6 +1340,10 @@ pub async fn checkout_room(
     if tong_tien_gio < 0.0 {
         return Err("Tiền giờ không hợp lệ.".to_string());
     }
+    let phu_thu = payload.surcharge_amount.unwrap_or(0.0);
+    if phu_thu < 0.0 {
+        return Err("Phụ thu không hợp lệ.".to_string());
+    }
 
     let tong_tien_san_pham: f64 = sqlx::query_scalar(
         "SELECT CAST(COALESCE(SUM(so_luong * don_gia), 0) AS REAL) FROM lich_su_phong_san_pham WHERE lich_su_phong_id = ?",
@@ -1351,12 +1358,14 @@ pub async fn checkout_room(
          SET gio_ket_thuc = datetime('now','localtime'),
              tong_tien_san_pham = ?,
              tong_tien_gio = ?,
+             phu_thu = ?,
              tong_tien_thanh_toan = ?,
              trang_thai = 'DA_THANH_TOAN'
          WHERE lich_su_phong_id = ?",
     )
     .bind(tong_tien_san_pham)
     .bind(tong_tien_gio)
+    .bind(phu_thu)
     .bind(payload.final_amount)
     .bind(payload.history_id)
     .execute(&mut *tx)
@@ -1415,6 +1424,7 @@ pub async fn checkout_room(
                 &checkout_items,
                 tong_tien_san_pham,
                 tong_tien_gio,
+                phu_thu,
                 payload.final_amount,
                 qr_cfg.print_qr_on_receipt,
             ),
@@ -1505,6 +1515,7 @@ pub async fn list_paid_history(
     let sql = "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
                     CAST(lsp.tong_tien_san_pham AS REAL) AS tong_tien_san_pham,
                     CAST(lsp.tong_tien_gio AS REAL) AS tong_tien_gio,
+                    CAST(lsp.phu_thu AS REAL) AS phu_thu,
                     CAST(lsp.tong_tien_thanh_toan AS REAL) AS tong_tien_thanh_toan
              FROM lich_su_phong lsp
              JOIN phong p ON p.phong_id = lsp.phong_id";
@@ -1657,17 +1668,22 @@ pub async fn update_paid_history_bill(
     .await
     .map_err(|e| e.to_string())?;
 
+    if payload.phu_thu < 0.0 {
+        return Err("Phụ thu không được nhỏ hơn 0.".to_string());
+    }
     let tong_tien_thanh_toan = payload.tong_tien_thanh_toan;
 
     sqlx::query(
         "UPDATE lich_su_phong
          SET tong_tien_san_pham = ?,
              tong_tien_gio = ?,
+             phu_thu = ?,
              tong_tien_thanh_toan = ?
          WHERE lich_su_phong_id = ? AND trang_thai = 'DA_THANH_TOAN'",
     )
     .bind(tong_tien_san_pham)
     .bind(payload.tong_tien_gio)
+    .bind(payload.phu_thu)
     .bind(tong_tien_thanh_toan)
     .bind(payload.history_id)
     .execute(&mut *tx)
@@ -1757,7 +1773,7 @@ pub async fn reprint_history_bill(
 
     let bill = sqlx::query(
         "SELECT lsp.lich_su_phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
-                lsp.tong_tien_san_pham, lsp.tong_tien_gio, lsp.tong_tien_thanh_toan
+                lsp.tong_tien_san_pham, lsp.tong_tien_gio, lsp.phu_thu, lsp.tong_tien_thanh_toan
          FROM lich_su_phong lsp
          JOIN phong p ON p.phong_id = lsp.phong_id
          WHERE lsp.lich_su_phong_id = ? AND lsp.trang_thai = 'DA_THANH_TOAN'",
@@ -1801,6 +1817,7 @@ pub async fn reprint_history_bill(
             &items,
             sqlite_f64(&bill, "tong_tien_san_pham")?,
             sqlite_f64(&bill, "tong_tien_gio")?,
+            sqlite_f64(&bill, "phu_thu")?,
             tong_thanh_toan,
             cfg.print_qr_on_receipt,
         ),

@@ -285,12 +285,7 @@ export function PrinterSettingsPage({
 
   return (
     <VStack gap={4} padding={4}>
-      <VStack gap={0.5}>
-        <Heading level={2}>Cài đặt in</Heading>
-        <Text type="supporting">
-          Ưu tiên chọn máy in hệ thống (USB/cục bộ). Chỉ nhập địa chỉ IP khi dùng máy in mạng.
-        </Text>
-      </VStack>
+      <Heading level={2}>Cài đặt in</Heading>
 
       <HStack gap={4} align="start">
         <VStack gap={2} width={220}>

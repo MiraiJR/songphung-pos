@@ -1,0 +1,1 @@
+ALTER TABLE lich_su_phong ADD COLUMN phu_thu REAL NOT NULL DEFAULT 0;

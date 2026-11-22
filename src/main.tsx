@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <InternationalizationProvider locale="vi-VN" messages={{ "vi-VN": viVN }}>
       <Theme theme={themes[defaultThemeSlug]}>
-        <LayerProvider toast={{ position: "topEnd" }}>
+        <LayerProvider toast={{ position: "bottomEnd" }}>
           <LinkProvider component={AstryxRouterLink}>
             <App />
           </LinkProvider>

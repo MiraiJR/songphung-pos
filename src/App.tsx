@@ -24,6 +24,7 @@ import { PrinterSettingsPage } from "@/features/settings/PrinterSettingsPage";
 import { useKaraoke } from "@/hooks/useKaraoke";
 import type { OrderItem, Product } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
+import { roundUpMoney } from "@/utils/roundMoney";
 
 type PrinterConnectionStatus = {
   connected: boolean;
@@ -115,6 +116,7 @@ function SongPhungShell() {
   const [temporaryBillQrPreviewUrl, setTemporaryBillQrPreviewUrl] = useState("");
   const [checkoutAmount, setCheckoutAmount] = useState("0");
   const [checkoutHourAmount, setCheckoutHourAmount] = useState("0");
+  const [checkoutSurchargeAmount, setCheckoutSurchargeAmount] = useState("0");
   const [checkoutPrintReceipt, setCheckoutPrintReceipt] = useState(true);
   const [printerChecking, setPrinterChecking] = useState(false);
   const [printerConnected, setPrinterConnected] = useState<boolean | null>(null);
@@ -611,6 +613,7 @@ function SongPhungShell() {
     const defaultHourAmount = Math.max(0, Math.ceil(karaoke.currentSession.tong_tien_gio));
     const defaultAmount = Math.ceil(karaoke.currentSession.tong_tien_thanh_toan);
     setCheckoutHourAmount(formatAmountDigits(String(defaultHourAmount)));
+    setCheckoutSurchargeAmount("0");
     setCheckoutAmount(formatAmountDigits(String(defaultAmount)));
     const canPrint = printerTarget.trim().length > 0;
     setCheckoutPrintReceipt(canPrint);
@@ -657,6 +660,11 @@ function SongPhungShell() {
       window.alert("Tiền giờ không hợp lệ.");
       return;
     }
+    const surchargeAmount = parseAmountInput(checkoutSurchargeAmount);
+    if (Number.isNaN(surchargeAmount) || surchargeAmount < 0) {
+      window.alert("Phụ thu không hợp lệ.");
+      return;
+    }
     const finalAmount = parseAmountInput(checkoutAmount);
     if (Number.isNaN(finalAmount) || finalAmount < 0) {
       window.alert("Thành tiền không hợp lệ.");
@@ -683,6 +691,7 @@ function SongPhungShell() {
           history_id: karaoke.currentSession.lich_su_phong_id,
           room_id: karaoke.selectedRoomId,
           hour_amount: hourAmount,
+          surcharge_amount: surchargeAmount,
           final_amount: finalAmount,
           print_receipt: shouldPrint,
           printer_name_or_ip: printerTarget || null,
@@ -879,11 +888,35 @@ function SongPhungShell() {
                           const nextHour = digits === "" ? "" : formatAmountDigits(digits);
                           setCheckoutHourAmount(nextHour);
                           const hour = digits === "" ? 0 : Number(digits);
+                          const surcharge = parseAmountInput(checkoutSurchargeAmount);
+                          const surchargeSafe = Number.isNaN(surcharge) ? 0 : surcharge;
                           const tienMon = Math.max(
                             0,
                             Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0),
                           );
-                          setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
+                          setCheckoutAmount(formatAmountDigits(String(tienMon + hour + surchargeSafe)));
+                        }}
+                        inputMode="numeric"
+                        isDisabled={checkoutSubmitting}
+                        width="100%"
+                        size="lg"
+                        controlStyle={{ textAlign: "right" }}
+                      />
+                      <TextInput
+                        label="Phụ thu"
+                        value={checkoutSurchargeAmount}
+                        onChange={(v) => {
+                          const digits = v.replace(/\D/g, "");
+                          const nextSurcharge = digits === "" ? "" : formatAmountDigits(digits);
+                          setCheckoutSurchargeAmount(nextSurcharge);
+                          const surcharge = digits === "" ? 0 : Number(digits);
+                          const hour = parseAmountInput(checkoutHourAmount);
+                          const hourSafe = Number.isNaN(hour) ? 0 : hour;
+                          const tienMon = Math.max(
+                            0,
+                            Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0),
+                          );
+                          setCheckoutAmount(formatAmountDigits(String(tienMon + hourSafe + surcharge)));
                         }}
                         inputMode="numeric"
                         isDisabled={checkoutSubmitting}
@@ -894,15 +927,33 @@ function SongPhungShell() {
                       <TextInput
                         label="Thành tiền"
                         value={checkoutAmount}
-                        onChange={(v) => {
-                          const digits = v.replace(/\D/g, "");
-                          setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
-                        }}
+                        onChange={() => {}}
                         inputMode="numeric"
-                        isDisabled={checkoutSubmitting}
+                        isDisabled
                         width="100%"
                         size="lg"
                         controlStyle={{ textAlign: "right" }}
+                      />
+                      <Button
+                        label="Làm tròn"
+                        variant="secondary"
+                        isDisabled={checkoutSubmitting}
+                        onClick={() => {
+                          const hour = parseAmountInput(checkoutHourAmount);
+                          const surcharge = parseAmountInput(checkoutSurchargeAmount);
+                          const hourSafe = Number.isNaN(hour) ? 0 : hour;
+                          const surchargeSafe = Number.isNaN(surcharge) ? 0 : surcharge;
+                          const tienMon = Math.max(
+                            0,
+                            Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0),
+                          );
+                          const total = tienMon + hourSafe + surchargeSafe;
+                          const rounded = roundUpMoney(total);
+                          const delta = rounded - total;
+                          if (delta <= 0) return;
+                          setCheckoutHourAmount(formatAmountDigits(String(hourSafe + delta)));
+                          setCheckoutAmount(formatAmountDigits(String(rounded)));
+                        }}
                       />
                       <CheckboxInput
                         label="In hóa đơn"
@@ -979,7 +1030,6 @@ function SongPhungShell() {
                       roomName={karaoke.currentSession.ten_phong}
                       startedAt={karaoke.currentSession.gio_bat_dau}
                       endedAt={formatLocalDateTimeForBill(new Date())}
-                      billNumber={karaoke.currentSession.lich_su_phong_id}
                       items={karaoke.currentSession.items.map((item) => ({
                         id: `checkout-pv-${item.san_pham_id}`,
                         name: item.ten_san_pham,
@@ -989,6 +1039,7 @@ function SongPhungShell() {
                       }))}
                       productTotal={karaoke.currentSession.tong_tien_san_pham}
                       hourTotal={Math.max(0, parseAmountInput(checkoutHourAmount) || 0)}
+                      surchargeTotal={Math.max(0, parseAmountInput(checkoutSurchargeAmount) || 0)}
                       grandTotal={Math.max(0, parseAmountInput(checkoutAmount) || 0)}
                       qrDataUrl={printBillQr ? checkoutQrPreviewUrl : ""}
                     />
@@ -1055,7 +1106,6 @@ function SongPhungShell() {
                       roomName={karaoke.currentSession.ten_phong}
                       startedAt={karaoke.currentSession.gio_bat_dau}
                       endedAt={temporaryBillNow}
-                      billNumber={karaoke.currentSession.lich_su_phong_id}
                       items={karaoke.currentSession.items.map((item) => ({
                         id: `temp-pv-${item.san_pham_id}`,
                         name: item.ten_san_pham,
@@ -1195,11 +1245,12 @@ function SongPhungShell() {
               onDeleteByIds={async (ids) => {
                 return invoke<number>("delete_history_by_ids", { ids });
               }}
-              onUpdateBill={async (historyId, tongTienGio, tongTienThanhToan, items) => {
+              onUpdateBill={async (historyId, tongTienGio, phuThu, tongTienThanhToan, items) => {
                 return invoke<string>("update_paid_history_bill", {
                   payload: {
                     history_id: historyId,
                     tong_tien_gio: tongTienGio,
+                    phu_thu: phuThu,
                     tong_tien_thanh_toan: tongTienThanhToan,
                     items: items.map((item) => ({
                       san_pham_id: item.san_pham_id,
@@ -1244,7 +1295,7 @@ export default function App() {
   return (
     <HashRouter>
       <SongPhungShell />
-      <Toaster position="top-right" richColors closeButton />
+      <Toaster position="bottom-right" richColors closeButton />
     </HashRouter>
   );
 }
