@@ -239,6 +239,26 @@ pub struct UpdateQrThanhToanPayload {
     pub qr_code: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintSettings {
+    pub printer_target: String,
+    pub print_qr_on_receipt: bool,
+    pub qr_use_fixed_amount: bool,
+    pub qr_fixed_amount_vnd: i64,
+    pub selected_qr_thanh_toan_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavePrintSettingsPayload {
+    pub printer_target: String,
+    pub print_qr_on_receipt: bool,
+    pub qr_use_fixed_amount: bool,
+    pub qr_fixed_amount_vnd: i64,
+    pub selected_qr_thanh_toan_id: Option<i64>,
+}
+
 fn sqlite_f64(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<f64, String> {
     if let Ok(value) = row.try_get::<f64, _>(column) {
         return Ok(value);
@@ -695,6 +715,88 @@ pub async fn delete_qr_thanh_toan(
     if result.rows_affected() == 0 {
         return Err("Không tìm thấy QR để xóa.".to_string());
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_print_settings(state: tauri::State<'_, DbState>) -> Result<PrintSettings, String> {
+    ensure_print_settings_row(state.pool()).await?;
+    let row = sqlx::query(
+        "SELECT printer_target,
+                print_qr_on_receipt,
+                qr_use_fixed_amount,
+                qr_fixed_amount_vnd,
+                selected_qr_thanh_toan_id
+         FROM cai_dat_in
+         WHERE id = 1",
+    )
+    .fetch_one(state.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(PrintSettings {
+        printer_target: row.try_get::<String, _>("printer_target").unwrap_or_default(),
+        print_qr_on_receipt: row.try_get::<i64, _>("print_qr_on_receipt").unwrap_or(1) != 0,
+        qr_use_fixed_amount: row.try_get::<i64, _>("qr_use_fixed_amount").unwrap_or(0) != 0,
+        qr_fixed_amount_vnd: row.try_get::<i64, _>("qr_fixed_amount_vnd").unwrap_or(0).max(0),
+        selected_qr_thanh_toan_id: row.try_get::<Option<i64>, _>("selected_qr_thanh_toan_id").ok().flatten(),
+    })
+}
+
+#[tauri::command]
+pub async fn save_print_settings(
+    state: tauri::State<'_, DbState>,
+    payload: SavePrintSettingsPayload,
+) -> Result<(), String> {
+    ensure_print_settings_row(state.pool()).await?;
+
+    let selected_id = match payload.selected_qr_thanh_toan_id {
+        Some(id) if id > 0 => {
+            let exists: Option<i64> = sqlx::query_scalar(
+                "SELECT qr_thanh_toan_id FROM qr_thanh_toan WHERE qr_thanh_toan_id = ?",
+            )
+            .bind(id)
+            .fetch_optional(state.pool())
+            .await
+            .map_err(|e| e.to_string())?;
+            if exists.is_none() {
+                return Err("QR thanh toán được chọn không tồn tại.".to_string());
+            }
+            Some(id)
+        }
+        _ => None,
+    };
+
+    let fixed_amount = payload.qr_fixed_amount_vnd.max(0);
+    sqlx::query(
+        "UPDATE cai_dat_in
+         SET printer_target = ?,
+             print_qr_on_receipt = ?,
+             qr_use_fixed_amount = ?,
+             qr_fixed_amount_vnd = ?,
+             selected_qr_thanh_toan_id = ?
+         WHERE id = 1",
+    )
+    .bind(payload.printer_target.trim())
+    .bind(if payload.print_qr_on_receipt { 1 } else { 0 })
+    .bind(if payload.qr_use_fixed_amount { 1 } else { 0 })
+    .bind(fixed_amount)
+    .bind(selected_id)
+    .execute(state.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn ensure_print_settings_row(pool: &sqlx::SqlitePool) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO cai_dat_in (id)
+         SELECT 1
+         WHERE NOT EXISTS (SELECT 1 FROM cai_dat_in WHERE id = 1)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -46,6 +46,8 @@ pub fn run() {
             commands::create_qr_thanh_toan,
             commands::update_qr_thanh_toan,
             commands::delete_qr_thanh_toan,
+            commands::get_print_settings,
+            commands::save_print_settings,
             commands::test_printer,
             commands::print_temporary_bill,
             commands::check_printer_connection,

@@ -23,13 +23,21 @@ type PrinterConnectionStatus = {
   address: string;
   message: string;
 };
-const PRINTER_STORAGE_KEY = "songphung_printer_target";
-const LS_QR_PRINT = "songphung_qr_print";
-const LS_QR_FIXED = "songphung_qr_fixed";
-const LS_QR_FIXED_AMOUNT = "songphung_qr_fixed_amount";
-const LS_QR_SELECTED_ID = "songphung_qr_selected_id";
+const LS_PRINTER_LEGACY = "songphung_printer_target";
+const LS_QR_PRINT_LEGACY = "songphung_qr_print";
+const LS_QR_FIXED_LEGACY = "songphung_qr_fixed";
+const LS_QR_FIXED_AMOUNT_LEGACY = "songphung_qr_fixed_amount";
+const LS_QR_SELECTED_ID_LEGACY = "songphung_qr_selected_id";
 
 type BillQrSettings = {
+  printQrOnReceipt: boolean;
+  qrUseFixedAmount: boolean;
+  qrFixedAmountVnd: number;
+  selectedQrThanhToanId: number | null;
+};
+
+type PrintSettings = {
+  printerTarget: string;
   printQrOnReceipt: boolean;
   qrUseFixedAmount: boolean;
   qrFixedAmountVnd: number;
@@ -114,52 +122,146 @@ function AppShell() {
   const [qrFixedAmountDisplay, setQrFixedAmountDisplay] = useState("");
   const [selectedQrThanhToanId, setSelectedQrThanhToanId] = useState<number | null>(null);
   const [qrThanhToanList, setQrThanhToanList] = useState<QrThanhToan[]>([]);
+  const [printSettingsReady, setPrintSettingsReady] = useState(false);
   const karaoke = useKaraoke();
+
+  async function persistPrintSettings(next: {
+    printerTarget?: string;
+    printBillQr?: boolean;
+    qrUseFixedAmount?: boolean;
+    qrFixedAmountDisplay?: string;
+    selectedQrThanhToanId?: number | null;
+  }) {
+    const printer = next.printerTarget ?? printerTarget;
+    const printQr = next.printBillQr ?? printBillQr;
+    const useFixed = printQr ? (next.qrUseFixedAmount ?? qrUseFixedAmount) : false;
+    const amountDisplay = next.qrFixedAmountDisplay ?? qrFixedAmountDisplay;
+    const selectedId =
+      next.selectedQrThanhToanId !== undefined ? next.selectedQrThanhToanId : selectedQrThanhToanId;
+    const fixedAmountVnd = Number(amountDisplay.replace(/\D/g, "") || "0");
+
+    try {
+      await invoke("save_print_settings", {
+        payload: {
+          printerTarget: printer.trim(),
+          printQrOnReceipt: printQr,
+          qrUseFixedAmount: useFixed,
+          qrFixedAmountVnd: Number.isFinite(fixedAmountVnd) ? Math.max(0, Math.floor(fixedAmountVnd)) : 0,
+          selectedQrThanhToanId: selectedId,
+        } satisfies PrintSettings,
+      });
+    } catch (error) {
+      console.error("Không lưu được cài đặt in vào SQLite:", error);
+    }
+  }
 
   useEffect(() => {
     void (async () => {
-      const saved = (localStorage.getItem(PRINTER_STORAGE_KEY) ?? "").trim();
-      if (saved) {
-        setPrinterTarget(saved);
-      } else {
-        try {
-          const printers = await invoke<string[]>("get_system_printers");
-          const firstPrinter = printers.find((name) => name.trim().length > 0) ?? "";
-          if (firstPrinter) {
-            setPrinterTarget(firstPrinter);
-            localStorage.setItem(PRINTER_STORAGE_KEY, firstPrinter);
+      try {
+        let settings = await invoke<PrintSettings>("get_print_settings");
+        const hasDbConfig =
+          settings.printerTarget.trim().length > 0 ||
+          settings.selectedQrThanhToanId != null ||
+          settings.qrFixedAmountVnd > 0 ||
+          !settings.printQrOnReceipt ||
+          settings.qrUseFixedAmount;
+
+        // Migrate one-time from legacy localStorage if DB still has defaults.
+        if (!hasDbConfig) {
+          const legacyPrinter = (localStorage.getItem(LS_PRINTER_LEGACY) ?? "").trim();
+          const legacyPrintQr = localStorage.getItem(LS_QR_PRINT_LEGACY) !== "0";
+          const legacyUseFixed = localStorage.getItem(LS_QR_FIXED_LEGACY) === "1";
+          const legacyFixedDigits = (localStorage.getItem(LS_QR_FIXED_AMOUNT_LEGACY) ?? "").replace(/\D/g, "");
+          const legacySelectedRaw = Number(localStorage.getItem(LS_QR_SELECTED_ID_LEGACY) ?? "");
+          const legacySelected =
+            Number.isFinite(legacySelectedRaw) && legacySelectedRaw > 0 ? legacySelectedRaw : null;
+          const legacyFixedAmount = Number(legacyFixedDigits || "0");
+
+          if (
+            legacyPrinter ||
+            legacySelected != null ||
+            legacyFixedAmount > 0 ||
+            !legacyPrintQr ||
+            legacyUseFixed
+          ) {
+            await invoke("save_print_settings", {
+              payload: {
+                printerTarget: legacyPrinter,
+                printQrOnReceipt: legacyPrintQr,
+                qrUseFixedAmount: legacyUseFixed,
+                qrFixedAmountVnd: Number.isFinite(legacyFixedAmount)
+                  ? Math.max(0, Math.floor(legacyFixedAmount))
+                  : 0,
+                selectedQrThanhToanId: legacySelected,
+              } satisfies PrintSettings,
+            });
+            settings = await invoke<PrintSettings>("get_print_settings");
+            localStorage.removeItem(LS_PRINTER_LEGACY);
+            localStorage.removeItem(LS_QR_PRINT_LEGACY);
+            localStorage.removeItem(LS_QR_FIXED_LEGACY);
+            localStorage.removeItem(LS_QR_FIXED_AMOUNT_LEGACY);
+            localStorage.removeItem(LS_QR_SELECTED_ID_LEGACY);
           }
-        } catch {
-          setPrinterTarget("");
         }
+
+        let nextPrinter = settings.printerTarget.trim();
+        if (!nextPrinter) {
+          try {
+            const printers = await invoke<string[]>("get_system_printers");
+            nextPrinter = printers.find((name) => name.trim().length > 0) ?? "";
+            if (nextPrinter) {
+              await invoke("save_print_settings", {
+                payload: {
+                  ...settings,
+                  printerTarget: nextPrinter,
+                } satisfies PrintSettings,
+              });
+            }
+          } catch {
+            nextPrinter = "";
+          }
+        }
+
+        setPrinterTarget(nextPrinter);
+        setPrintBillQr(settings.printQrOnReceipt);
+        setQrUseFixedAmount(settings.qrUseFixedAmount);
+        setQrFixedAmountDisplay(
+          settings.qrFixedAmountVnd > 0 ? formatAmountDigits(String(settings.qrFixedAmountVnd)) : "",
+        );
+        setSelectedQrThanhToanId(settings.selectedQrThanhToanId);
+      } catch (error) {
+        console.error("Không tải được cài đặt in từ SQLite:", error);
+      } finally {
+        setPrintSettingsReady(true);
       }
-      setPrintBillQr(localStorage.getItem(LS_QR_PRINT) !== "0");
-      setQrUseFixedAmount(localStorage.getItem(LS_QR_FIXED) === "1");
-      const fixedAmountRaw = localStorage.getItem(LS_QR_FIXED_AMOUNT) ?? "";
-      const fixedDigits = fixedAmountRaw.replace(/\D/g, "");
-      setQrFixedAmountDisplay(fixedDigits ? formatAmountDigits(fixedDigits) : "");
-      const selectedRaw = Number(localStorage.getItem(LS_QR_SELECTED_ID) ?? "");
-      setSelectedQrThanhToanId(Number.isFinite(selectedRaw) && selectedRaw > 0 ? selectedRaw : null);
     })();
   }, []);
 
   useEffect(() => {
+    if (!printSettingsReady) return;
     void (async () => {
       try {
         const list = await invoke<QrThanhToan[]>("list_qr_thanh_toan");
         setQrThanhToanList(list);
         if (list.length === 0) {
-          persistSelectedQrId(null);
+          if (selectedQrThanhToanId != null) {
+            setSelectedQrThanhToanId(null);
+            await persistPrintSettings({ selectedQrThanhToanId: null });
+          }
           return;
         }
         if (selectedQrThanhToanId == null || !list.some((x) => x.qr_thanh_toan_id === selectedQrThanhToanId)) {
-          persistSelectedQrId(list[0].qr_thanh_toan_id);
+          const nextId = list[0].qr_thanh_toan_id;
+          setSelectedQrThanhToanId(nextId);
+          await persistPrintSettings({ selectedQrThanhToanId: nextId });
         }
       } catch {
         // ignore; settings page will show detailed errors
       }
     })();
-  }, []);
+    // Only re-run when settings finish loading; list sync uses current selected id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printSettingsReady]);
 
   useEffect(() => {
     if (!historyDate) return;
@@ -168,36 +270,34 @@ function AppShell() {
 
   function updatePrinterTarget(value: string) {
     setPrinterTarget(value);
-    localStorage.setItem(PRINTER_STORAGE_KEY, value);
+    void persistPrintSettings({ printerTarget: value });
   }
 
   function persistQrPrint(value: boolean) {
     setPrintBillQr(value);
-    localStorage.setItem(LS_QR_PRINT, value ? "1" : "0");
     if (!value) {
       setQrUseFixedAmount(false);
-      localStorage.setItem(LS_QR_FIXED, "0");
+      void persistPrintSettings({ printBillQr: false, qrUseFixedAmount: false });
+      return;
     }
+    void persistPrintSettings({ printBillQr: value });
   }
 
   function persistQrUseFixed(value: boolean) {
     setQrUseFixedAmount(value);
-    localStorage.setItem(LS_QR_FIXED, value ? "1" : "0");
+    void persistPrintSettings({ qrUseFixedAmount: value });
   }
 
   function persistQrFixedAmountDisplay(value: string) {
     const digits = value.replace(/\D/g, "");
-    setQrFixedAmountDisplay(digits ? formatAmountDigits(digits) : "");
-    localStorage.setItem(LS_QR_FIXED_AMOUNT, digits);
+    const display = digits ? formatAmountDigits(digits) : "";
+    setQrFixedAmountDisplay(display);
+    void persistPrintSettings({ qrFixedAmountDisplay: display });
   }
 
   function persistSelectedQrId(value: number | null) {
     setSelectedQrThanhToanId(value);
-    if (value == null) {
-      localStorage.removeItem(LS_QR_SELECTED_ID);
-    } else {
-      localStorage.setItem(LS_QR_SELECTED_ID, String(value));
-    }
+    void persistPrintSettings({ selectedQrThanhToanId: value });
   }
 
   async function loadQrPreviewDataUrlById(qrId: number | null): Promise<string> {
