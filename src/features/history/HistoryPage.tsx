@@ -1,33 +1,65 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { toast } from "sonner";
-import { Loader2, Trash2, X } from "lucide-react";
-import { DatePicker } from "@/components/ui/date-picker";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
+
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { DateInput } from "@astryxdesign/core/DateInput";
+import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Divider } from "@astryxdesign/core/Divider";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
+import { Selector } from "@astryxdesign/core/Selector";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
+import {
+  Table,
+  TableSelectionToolbar,
+  useTableSelection,
+  useTableSelectionState,
+  proportional,
+  pixel,
+} from "@astryxdesign/core/Table";
+import type { TableColumn, TablePlugin } from "@astryxdesign/core/Table";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useToast } from "@astryxdesign/core/Toast";
+
 import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
 import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Select } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import type { HistoryOrderItem, PaidHistory, Product } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+type ISODate = `${number}${number}${number}${number}-${number}${number}-${number}${number}`;
+
+interface HistoryRow extends Record<string, unknown> {
+  id: string;
+  lich_su_phong_id: number;
+  phong_id: number;
+  ten_phong: string;
+  gio_bat_dau: string;
+  gio_ket_thuc: string | null;
+  tong_tien_san_pham: number;
+  tong_tien_gio: number;
+  tong_tien_thanh_toan: number;
+}
 
 type Props = {
   histories: PaidHistory[];
   historyItems: HistoryOrderItem[];
   products: Product[];
-  historyDate: string;
-  onDateChange: (v: string) => void;
+  historyStart: string;
+  historyEnd: string;
+  onStartChange: (v: string) => void;
+  onEndChange: (v: string) => void;
   onFilter: () => void | Promise<void>;
   onOpenDetail: (historyId: number) => Promise<void>;
   onReprintBill: (historyId: number, selectedQrThanhToanId: number | null) => Promise<string>;
@@ -35,7 +67,6 @@ type Props = {
   defaultSelectedQrThanhToanId: number | null;
   printBillQr: boolean;
   onDeleteByIds: (ids: number[]) => Promise<number>;
-  onDeleteByRange: (startDate: string, endDate: string) => Promise<number>;
   onUpdateBill: (
     historyId: number,
     tongTienGio: number,
@@ -44,6 +75,10 @@ type Props = {
   ) => Promise<string>;
   onReloadHistory: () => Promise<void>;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
 
 function formatMoneyInput(value: string): string {
   const digits = value.replace(/\D/g, "");
@@ -57,19 +92,23 @@ function parseMoneyInput(value: string): number {
   return Number(digits);
 }
 
-function todayLocalYmd(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function parseBillDateTime(value: string | null): Date | null {
   if (!value) return null;
   const normalized = value.includes("T") ? value : value.replace(" ", "T");
   const d = new Date(normalized);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatTimeOnly(raw: string | null | undefined): string {
+  if (!raw) return "--";
+  const timePart = raw.trim().split(/[\sT]/)[1];
+  if (!timePart) return "--";
+  const [hStr, min] = timePart.split(":");
+  const hour = parseInt(hStr, 10);
+  if (isNaN(hour)) return "--";
+  const ampm = hour < 12 ? "AM" : "PM";
+  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  return `${String(h12).padStart(2, "0")}:${min} ${ampm}`;
 }
 
 function formatBillDuration(startRaw: string, endRaw: string | null): string {
@@ -82,12 +121,18 @@ function formatBillDuration(startRaw: string, endRaw: string | null): string {
   return hours <= 0 ? `${minutes} phút` : `${hours} giờ ${minutes} phút`;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
 export function HistoryPage({
   histories,
   historyItems,
   products,
-  historyDate,
-  onDateChange,
+  historyStart,
+  historyEnd,
+  onStartChange,
+  onEndChange,
   onFilter,
   onOpenDetail,
   onReprintBill,
@@ -95,14 +140,16 @@ export function HistoryPage({
   defaultSelectedQrThanhToanId,
   printBillQr,
   onDeleteByIds,
-  onDeleteByRange,
   onUpdateBill,
   onReloadHistory,
 }: Props) {
-  const [menuHistoryId, setMenuHistoryId] = useState<number | null>(null);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const showToast = useToast();
+
+  /* ---- State: detail / view ---- */
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState<PaidHistory | null>(null);
+
+  /* ---- State: reprint ---- */
   const [reprintStatus, setReprintStatus] = useState<{ type: "ok" | "error"; message: string } | null>(null);
   const [reprintingHistoryId, setReprintingHistoryId] = useState<number | null>(null);
   const [reprintConfirmOpen, setReprintConfirmOpen] = useState(false);
@@ -110,13 +157,12 @@ export function HistoryPage({
   const [reprintSelectedQrId, setReprintSelectedQrId] = useState<number | null>(null);
   const [reprintQrPreviewUrl, setReprintQrPreviewUrl] = useState("");
 
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  /* ---- State: selection & delete ---- */
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deleteIdsDialogOpen, setDeleteIdsDialogOpen] = useState(false);
-  const [deleteRangeDialogOpen, setDeleteRangeDialogOpen] = useState(false);
-  const [rangeStart, setRangeStart] = useState(() => todayLocalYmd());
-  const [rangeEnd, setRangeEnd] = useState(() => todayLocalYmd());
-  const [rangeConfirmText, setRangeConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  /* ---- State: edit ---- */
   const [editOpen, setEditOpen] = useState(false);
   const [editingHistory, setEditingHistory] = useState<PaidHistory | null>(null);
   const [editTienGio, setEditTienGio] = useState("0");
@@ -125,80 +171,73 @@ export function HistoryPage({
   const [editLines, setEditLines] = useState<Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>>([]);
   const [editProductKeyword, setEditProductKeyword] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editInitializedForHistoryId, setEditInitializedForHistoryId] = useState<number | null>(null);
+  const [removedProductIds, setRemovedProductIds] = useState<string[]>([]);
+  const [editPrintAfterSave, setEditPrintAfterSave] = useState(false);
+
+  /* ---- State: toolbar ---- */
   const [filtering, setFiltering] = useState(false);
   const [openingActionId, setOpeningActionId] = useState<number | null>(null);
-  const [editInitializedForHistoryId, setEditInitializedForHistoryId] = useState<number | null>(null);
-  const [editPrintAfterSave, setEditPrintAfterSave] = useState(false);
-  const optionButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
-  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const [roomSearch, setRoomSearch] = useState("");
 
-  async function handleViewDetail(item: PaidHistory) {
-    setOpeningActionId(item.lich_su_phong_id);
-    try {
-      await onOpenDetail(item.lich_su_phong_id);
-      setSelectedHistory(item);
-      setDetailOpen(true);
-    } finally {
-      setOpeningActionId(null);
-      setMenuHistoryId(null);
-      setMenuPosition(null);
-    }
-  }
+  useEffect(() => {
+    void handleFilter();
+    // Tải lại mỗi lần mở trang Lịch sử.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function handleOpenEdit(item: PaidHistory) {
-    setOpeningActionId(item.lich_su_phong_id);
-    try {
-      await onOpenDetail(item.lich_su_phong_id);
-      setEditingHistory(item);
-      setEditTienGio(formatMoneyInput(String(Math.round(item.tong_tien_gio))));
-      setEditTongTien(formatMoneyInput(String(Math.round(item.tong_tien_thanh_toan))));
-      setEditQtyByProductId({});
-      setEditLines([]);
-      setEditProductKeyword("");
-      setEditInitializedForHistoryId(null);
-      setEditPrintAfterSave(false);
-      setEditOpen(true);
-    } finally {
-      setOpeningActionId(null);
-      setMenuHistoryId(null);
-      setMenuPosition(null);
-    }
-  }
+  /* ---- Derived: filtered data for table ---- */
+  const filteredHistories = useMemo(() => {
+    if (!roomSearch.trim()) return histories;
+    const kw = roomSearch.trim().toLowerCase();
+    return histories.filter((h) => h.ten_phong.toLowerCase().includes(kw));
+  }, [histories, roomSearch]);
 
-  async function requestReprint(item: PaidHistory) {
-    setOpeningActionId(item.lich_su_phong_id);
-    setMenuHistoryId(null);
-    setMenuPosition(null);
-    try {
-      await onOpenDetail(item.lich_su_phong_id);
-    } catch {
-      // keep modal open flow even if detail refresh fails
-    } finally {
-      setOpeningActionId(null);
-    }
-    setReprintTarget(item);
-    setReprintSelectedQrId(defaultSelectedQrThanhToanId);
-    setReprintConfirmOpen(true);
-  }
+  const tableData: HistoryRow[] = useMemo(
+    () =>
+      filteredHistories.map((h) => ({
+        id: String(h.lich_su_phong_id),
+        lich_su_phong_id: h.lich_su_phong_id,
+        phong_id: h.phong_id,
+        ten_phong: h.ten_phong,
+        gio_bat_dau: h.gio_bat_dau,
+        gio_ket_thuc: h.gio_ket_thuc,
+        tong_tien_san_pham: h.tong_tien_san_pham,
+        tong_tien_gio: h.tong_tien_gio,
+        tong_tien_thanh_toan: h.tong_tien_thanh_toan,
+      })),
+    [filteredHistories],
+  );
 
-  async function handleConfirmReprint() {
-    if (!reprintTarget) return;
-    setReprintingHistoryId(reprintTarget.lich_su_phong_id);
-    setReprintStatus(null);
-    try {
-      const message = await onReprintBill(reprintTarget.lich_su_phong_id, reprintSelectedQrId);
-      setReprintStatus({ type: "ok", message });
-      setReprintConfirmOpen(false);
-      setReprintTarget(null);
-    } catch (error) {
-      setReprintStatus({
-        type: "error",
-        message: `In lại hóa đơn thất bại: ${String(error)}`,
-      });
-    } finally {
-      setReprintingHistoryId(null);
-    }
-  }
+  /* ---- Table selection ---- */
+  const { selectionConfig, selectionState } = useTableSelectionState<HistoryRow>({
+    data: tableData,
+    idKey: "id",
+    selectedKeys,
+    setSelectedKeys,
+  });
+  const selectionPlugin = useTableSelection<HistoryRow>(selectionConfig);
+
+  /* ---- Computed ---- */
+  const totalRevenue = filteredHistories.reduce((sum, h) => sum + h.tong_tien_thanh_toan, 0);
+  const totalHourFee = filteredHistories.reduce((sum, h) => sum + h.tong_tien_gio, 0);
+
+  const editTongTienMon = editLines.reduce((sum, item) => {
+    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
+    return sum + item.don_gia * (Number.isFinite(qty) && qty >= 0 ? qty : 0);
+  }, 0);
+
+  const addableProducts = products.filter((product) => {
+    if (editLines.some((line) => line.san_pham_id === product.san_pham_id)) return false;
+    if (!editProductKeyword.trim()) return true;
+    return product.ten_san_pham.toLowerCase().includes(editProductKeyword.trim().toLowerCase());
+  });
+
+  /* ---- Effects ---- */
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [histories]);
 
   useEffect(() => {
     if (!reprintConfirmOpen || !printBillQr || reprintSelectedQrId == null) {
@@ -230,8 +269,109 @@ export function HistoryPage({
     setEditQtyByProductId(
       Object.fromEntries(historyItems.map((row) => [row.san_pham_id, String(row.so_luong)])),
     );
+    setRemovedProductIds([]);
     setEditInitializedForHistoryId(editingHistory.lich_su_phong_id);
   }, [editOpen, editingHistory, editInitializedForHistoryId, historyItems]);
+
+  /* ---- Handlers ---- */
+
+  async function handleFilter() {
+    setFiltering(true);
+    try {
+      await Promise.resolve(onFilter());
+    } finally {
+      setFiltering(false);
+    }
+  }
+
+  async function handleViewDetail(item: PaidHistory) {
+    setOpeningActionId(item.lich_su_phong_id);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+      setSelectedHistory(item);
+      setDetailOpen(true);
+    } finally {
+      setOpeningActionId(null);
+    }
+  }
+
+  const viewDetailRef = useRef(handleViewDetail);
+  viewDetailRef.current = handleViewDetail;
+
+  const rowOpenPlugin = useMemo<TablePlugin<HistoryRow>>(
+    () => ({
+      rowModel: "flat",
+      transformBodyRow: (props, item) => ({
+        ...props,
+        htmlProps: {
+          ...props.htmlProps,
+          style: {...props.htmlProps.style, cursor: "pointer"},
+          onClick: (event) => {
+            props.htmlProps.onClick?.(event);
+            if (event.defaultPrevented) return;
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest("button, a, input, label, [role='checkbox'], [role='menuitem']")
+            ) {
+              return;
+            }
+            const history = histories.find((h) => h.lich_su_phong_id === item.lich_su_phong_id);
+            if (history) void viewDetailRef.current(history);
+          },
+        },
+      }),
+    }),
+    [histories],
+  );
+
+  async function handleOpenEdit(item: PaidHistory) {
+    setOpeningActionId(item.lich_su_phong_id);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+      setEditingHistory(item);
+      setEditTienGio(formatMoneyInput(String(Math.round(item.tong_tien_gio))));
+      setEditTongTien(formatMoneyInput(String(Math.round(item.tong_tien_thanh_toan))));
+      setEditQtyByProductId({});
+      setEditLines([]);
+      setEditProductKeyword("");
+      setEditInitializedForHistoryId(null);
+      setEditPrintAfterSave(false);
+      setEditOpen(true);
+    } finally {
+      setOpeningActionId(null);
+    }
+  }
+
+  async function requestReprint(item: PaidHistory) {
+    setOpeningActionId(item.lich_su_phong_id);
+    try {
+      await onOpenDetail(item.lich_su_phong_id);
+    } catch {
+      /* keep flow */
+    } finally {
+      setOpeningActionId(null);
+    }
+    setReprintTarget(item);
+    setReprintSelectedQrId(defaultSelectedQrThanhToanId);
+    setReprintConfirmOpen(true);
+  }
+
+  async function handleConfirmReprint() {
+    if (!reprintTarget) return;
+    setReprintingHistoryId(reprintTarget.lich_su_phong_id);
+    setReprintStatus(null);
+    try {
+      const message = await onReprintBill(reprintTarget.lich_su_phong_id, reprintSelectedQrId);
+      setReprintStatus({ type: "ok", message });
+      setReprintConfirmOpen(false);
+      setReprintTarget(null);
+    } catch (error) {
+      setReprintStatus({ type: "error", message: `In lại hóa đơn thất bại: ${String(error)}` });
+    } finally {
+      setReprintingHistoryId(null);
+    }
+  }
 
   function recalcEditTotal(
     nextLines: Array<{ san_pham_id: string; ten_san_pham: string; don_gia: number }>,
@@ -251,12 +391,12 @@ export function HistoryPage({
     if (!editingHistory) return;
     const tongTienGio = parseMoneyInput(editTienGio);
     if (!Number.isFinite(tongTienGio) || tongTienGio < 0) {
-      toast.error("Tiền giờ không hợp lệ.");
+      showToast({ body: "Tiền giờ không hợp lệ.", type: "error" });
       return;
     }
     const tongTienThanhToan = parseMoneyInput(editTongTien);
     if (!Number.isFinite(tongTienThanhToan) || tongTienThanhToan < 0) {
-      toast.error("Tổng tiền không hợp lệ.");
+      showToast({ body: "Tổng tiền không hợp lệ.", type: "error" });
       return;
     }
 
@@ -266,11 +406,15 @@ export function HistoryPage({
       const raw = editQtyByProductId[row.san_pham_id] ?? "0";
       const qty = Number(raw);
       if (!Number.isInteger(qty) || qty < 0) {
-        toast.error(`Số lượng không hợp lệ cho món ${row.ten_san_pham}.`);
+        showToast({ body: `Số lượng không hợp lệ cho món ${row.ten_san_pham}.`, type: "error" });
         return;
       }
       donGiaBySanPhamId[row.san_pham_id] = row.don_gia;
       payloadItems.push({ san_pham_id: row.san_pham_id, so_luong: qty });
+    }
+    for (const productId of removedProductIds) {
+      if (payloadItems.some((item) => item.san_pham_id === productId)) continue;
+      payloadItems.push({ san_pham_id: productId, so_luong: 0 });
     }
     const tongTienSanPhamMoi = payloadItems.reduce(
       (sum, item) => sum + (donGiaBySanPhamId[item.san_pham_id] ?? 0) * item.so_luong,
@@ -285,7 +429,7 @@ export function HistoryPage({
         tongTienThanhToan,
         payloadItems,
       );
-      toast.success(message);
+      showToast({ body: message });
       await onReloadHistory();
       await onOpenDetail(editingHistory.lich_su_phong_id);
       if (editPrintAfterSave) {
@@ -294,346 +438,298 @@ export function HistoryPage({
             editingHistory.lich_su_phong_id,
             defaultSelectedQrThanhToanId,
           );
-          toast.success(printMessage);
+          showToast({ body: printMessage });
         } catch (error) {
-          toast.error(`Đã lưu nhưng in hóa đơn thất bại: ${String(error)}`);
+          showToast({ body: `Đã lưu nhưng in hóa đơn thất bại: ${String(error)}`, type: "error" });
         }
       }
       setSelectedHistory((prev) =>
         prev && prev.lich_su_phong_id === editingHistory.lich_su_phong_id
           ? {
-            ...prev,
-            tong_tien_gio: tongTienGio,
-            tong_tien_san_pham: tongTienSanPhamMoi,
-            tong_tien_thanh_toan: tongTienThanhToan,
-          }
+              ...prev,
+              tong_tien_gio: tongTienGio,
+              tong_tien_san_pham: tongTienSanPhamMoi,
+              tong_tien_thanh_toan: tongTienThanhToan,
+            }
           : prev,
       );
       setEditOpen(false);
     } catch (error) {
-      toast.error(`Cập nhật hóa đơn thất bại: ${String(error)}`);
+      showToast({ body: `Cập nhật hóa đơn thất bại: ${String(error)}`, type: "error" });
     } finally {
       setSavingEdit(false);
-    }
-  }
-
-  function toggleSelect(id: number) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleSelectAll() {
-    if (selectedIds.size === histories.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(histories.map((h) => h.lich_su_phong_id)));
     }
   }
 
   async function confirmDeleteByIds() {
     setDeleting(true);
     try {
-      const ids = Array.from(selectedIds);
+      const ids = Array.from(selectionState.selectedKeys).map(Number);
       const count = await onDeleteByIds(ids);
-      toast.success(`Đã xóa ${count} hóa đơn thành công.`);
-      setSelectedIds(new Set());
+      showToast({ body: `Đã xóa ${count} hóa đơn thành công.` });
+      selectionState.clearSelection();
       await onReloadHistory();
     } catch (error) {
-      toast.error(`Xóa thất bại: ${String(error)}`);
+      showToast({ body: `Xóa thất bại: ${String(error)}`, type: "error" });
     } finally {
       setDeleting(false);
       setDeleteIdsDialogOpen(false);
     }
   }
 
-  async function confirmDeleteByRange() {
-    setDeleting(true);
-    try {
-      const count = await onDeleteByRange(rangeStart, rangeEnd);
-      toast.success(`Đã xóa ${count} hóa đơn trong khoảng ngày đã chọn.`);
-      setSelectedIds(new Set());
-      setRangeConfirmText("");
-      await onReloadHistory();
-    } catch (error) {
-      toast.error(`Xóa thất bại: ${String(error)}`);
-    } finally {
-      setDeleting(false);
-      setDeleteRangeDialogOpen(false);
-    }
-  }
+  /* ---- Table columns ---- */
 
-  const allSelected = histories.length > 0 && selectedIds.size === histories.length;
-  const someSelected = selectedIds.size > 0 && selectedIds.size < histories.length;
-  const totalRevenue = histories.reduce((sum, item) => sum + item.tong_tien_thanh_toan, 0);
-  const editTongTienMon = editLines.reduce((sum, item) => {
-    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
-    return sum + item.don_gia * (Number.isFinite(qty) && qty >= 0 ? qty : 0);
-  }, 0);
-  const addableProducts = products.filter((product) => {
-    if (editLines.some((line) => line.san_pham_id === product.san_pham_id)) return false;
-    if (!editProductKeyword.trim()) return true;
-    return product.ten_san_pham.toLowerCase().includes(editProductKeyword.trim().toLowerCase());
-  });
-
-  async function handleFilter() {
-    setFiltering(true);
-    try {
-      await Promise.resolve(onFilter());
-    } finally {
-      setFiltering(false);
-    }
-  }
-
-  useEffect(() => {
-    if (menuHistoryId == null) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const btn = optionButtonRefs.current[menuHistoryId];
-      if (dropdownRef.current?.contains(target)) return;
-      if (btn?.contains(target)) return;
-      setMenuHistoryId(null);
-      setMenuPosition(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenuHistoryId(null);
-        setMenuPosition(null);
-      }
-    };
-    const onViewportChanged = () => {
-      setMenuHistoryId(null);
-      setMenuPosition(null);
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onViewportChanged);
-    window.addEventListener("scroll", onViewportChanged, true);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onViewportChanged);
-      window.removeEventListener("scroll", onViewportChanged, true);
-    };
-  }, [menuHistoryId]);
-
-  return (
-    <section className="p-4">
-      <div className="mb-4 flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Lịch sử phòng</h2>
-          <p className="mt-1 text-sm text-slate-500">Theo dõi hóa đơn đã thanh toán và in lại khi cần.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <DatePicker value={historyDate} onChange={onDateChange} />
-          <Button className="h-[48px]" variant="default" disabled={filtering} onClick={() => void handleFilter()}>
-            {filtering ? (
-              <>
-                <Loader2 className="mr-1.5 size-4 animate-spin" />
-                Đang lọc...
-              </>
-            ) : (
-              "Lọc"
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="app-card mb-4 grid grid-cols-2 gap-3 p-3">
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-          Tổng hóa đơn: <span className="font-bold text-slate-800">{histories.length}</span>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-          Tổng doanh thu: <span className="font-bold text-primary">{totalRevenue.toLocaleString()}</span>
-        </div>
-      </div>
-
-      {/* Bulk actions toolbar */}
-      {selectedIds.size > 0 && (
-        <div className="app-card mb-4 flex items-center gap-3 border-rose-200 bg-rose-50 px-4 py-3">
-          <span className="text-sm font-medium text-rose-800">
-            Đã chọn {selectedIds.size} hóa đơn
-          </span>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setDeleteIdsDialogOpen(true)}
-          >
-            <Trash2 className="mr-1.5 size-4" />
-            Xóa mục đã chọn
-          </Button>
-        </div>
-      )}
-
-      {/* Delete by date range */}
-      <div className="app-card mb-4 flex flex-wrap items-end gap-3 p-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Từ ngày</label>
-          <DatePicker value={rangeStart} onChange={setRangeStart} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Đến ngày</label>
-          <DatePicker value={rangeEnd} onChange={setRangeEnd} />
-        </div>
-        <Button
-          variant="destructive"
-          className="h-[48px]"
-          onClick={() => {
-            if (rangeStart > rangeEnd) {
-              toast.error("Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.");
-              return;
-            }
-            setRangeConfirmText("");
-            setDeleteRangeDialogOpen(true);
-          }}
-        >
-          <Trash2 className="mr-1.5 size-4" />
-          Xóa theo khoảng ngày
-        </Button>
-      </div>
-
-      {reprintStatus && (
-        <div
-          className={`mb-3 rounded px-3 py-2 text-sm ${reprintStatus.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-            }`}
-        >
-          {reprintStatus.message}
-        </div>
-      )}
-
-      <div>
-        <div className="app-card overflow-visible">
-          <div className="relative z-10 overflow-x-auto">
-            <div className="min-w-[1180px]">
-              <div className="grid grid-cols-[40px,90px,150px,150px,130px,120px,120px,120px,120px] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                <span className="flex items-center justify-center">
-                  <Checkbox
-                    checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </span>
-                <span>Phòng</span>
-                <span>Bắt đầu</span>
-                <span>Kết thúc</span>
-                <span>Tổng giờ hát</span>
-                <span className="text-right">Tiền món</span>
-                <span className="text-right">Tiền giờ</span>
-                <span className="text-right">Tổng tiền</span>
-                <span className="text-right">Thao tác</span>
-              </div>
-              {histories.map((item) => (
-                <div
-                  key={item.lich_su_phong_id}
-                  className={`relative grid grid-cols-[40px,90px,150px,150px,130px,120px,120px,120px,120px] items-center border-b border-slate-200 px-4 py-3 text-sm hover:bg-slate-50 ${selectedIds.has(item.lich_su_phong_id) ? "bg-rose-50/50" : ""
-                    } ${menuHistoryId === item.lich_su_phong_id ? "z-30" : "z-0"
-                    }`}
-                >
-                  <span className="flex items-center justify-center">
-                    <Checkbox
-                      checked={selectedIds.has(item.lich_su_phong_id)}
-                      onCheckedChange={() => toggleSelect(item.lich_su_phong_id)}
-                    />
-                  </span>
-                  <div className="font-semibold text-slate-800">{item.ten_phong}</div>
-                  <div className="text-slate-600">{formatDateTime(item.gio_bat_dau)}</div>
-                  <div className="text-slate-600">{formatDateTime(item.gio_ket_thuc)}</div>
-                  <div className="text-slate-700">{formatBillDuration(item.gio_bat_dau, item.gio_ket_thuc)}</div>
-                  <div className="text-right font-semibold text-slate-800">
-                    {Math.round(item.tong_tien_san_pham).toLocaleString()}
-                  </div>
-                  <div className="text-right font-semibold text-slate-800">
-                    {Math.round(item.tong_tien_gio).toLocaleString()}
-                  </div>
-                  <div className="text-right text-base font-semibold text-slate-800">
-                    {Math.round(item.tong_tien_thanh_toan).toLocaleString()}
-                  </div>
-                  <div className="relative z-20 flex flex-col items-end">
-                    <button
-                      ref={(el) => {
-                        optionButtonRefs.current[item.lich_su_phong_id] = el;
-                      }}
-                      type="button"
-                      className="relative z-20 rounded-md bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={openingActionId === item.lich_su_phong_id || reprintingHistoryId === item.lich_su_phong_id}
-                      onClick={(e) => {
-                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                        setMenuHistoryId((prev) => {
-                          const next = prev === item.lich_su_phong_id ? null : item.lich_su_phong_id;
-                          if (next == null) {
-                            setMenuPosition(null);
-                          } else {
-                            setMenuPosition({
-                              top: rect.bottom + 6,
-                              right: window.innerWidth - rect.right,
-                            });
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      {openingActionId === item.lich_su_phong_id ? "Đang mở..." : "Tùy chọn"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {histories.length === 0 && (
-            <div className="px-4 py-8 text-center text-sm text-slate-400">
-              Không có hóa đơn nào trong ngày đã chọn.
-            </div>
-          )}
-        </div>
-      </div>
-      {menuHistoryId != null &&
-        menuPosition &&
-        createPortal(
-          <div
-            ref={dropdownRef}
-            style={{ top: menuPosition.top, right: menuPosition.right }}
-            className="fixed z-[120] w-44 rounded border border-slate-200 bg-white p-1 text-left shadow-lg"
-          >
-            <button
-              type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
-              disabled={openingActionId != null}
+  const columns: TableColumn<HistoryRow>[] = [
+    {
+      key: "ten_phong",
+      header: "Phòng",
+      width: proportional(1.4),
+      renderCell: (row) => (
+        <VStack gap={0}>
+          <Text weight="semibold">{row.ten_phong}</Text>
+          <Text type="supporting" color="secondary">
+            #{String(row.lich_su_phong_id).padStart(5, "0")}
+          </Text>
+        </VStack>
+      ),
+    },
+    {
+      key: "thoi_gian",
+      header: "Thời gian",
+      width: proportional(1.6),
+      renderCell: (row) => (
+        <VStack gap={0}>
+          <Text>
+            {formatTimeOnly(row.gio_bat_dau)} → {formatTimeOnly(row.gio_ket_thuc)}
+          </Text>
+          <Text type="supporting" color="secondary">
+            {formatBillDuration(row.gio_bat_dau, row.gio_ket_thuc)}
+          </Text>
+        </VStack>
+      ),
+    },
+    {
+      key: "tong_tien_san_pham",
+      header: "Tiền món",
+      width: proportional(1),
+      align: "end",
+      renderCell: (row) => (
+        <Text hasTabularNumbers>{Math.round(row.tong_tien_san_pham).toLocaleString("vi-VN")}</Text>
+      ),
+    },
+    {
+      key: "tong_tien_gio",
+      header: "Tiền giờ",
+      width: proportional(1),
+      align: "end",
+      renderCell: (row) => (
+        <Text hasTabularNumbers>{Math.round(row.tong_tien_gio).toLocaleString("vi-VN")}</Text>
+      ),
+    },
+    {
+      key: "tong_tien_thanh_toan",
+      header: "Tổng tiền",
+      width: proportional(1.1),
+      align: "end",
+      renderCell: (row) => (
+        <Text weight="semibold" hasTabularNumbers>
+          {Math.round(row.tong_tien_thanh_toan).toLocaleString("vi-VN")}
+        </Text>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Thao tác",
+      width: pixel(148),
+      align: "end",
+      renderCell: (row) => {
+        const isRowBusy = openingActionId === row.lich_su_phong_id;
+        const isRowPrinting = reprintingHistoryId === row.lich_su_phong_id;
+        return (
+          <HStack gap={0.5} hAlign="end" vAlign="center">
+            <IconButton
+              label="Xem chi tiết"
+              icon={<Icon icon={Eye} />}
+              variant="ghost"
+              size="sm"
+              isLoading={isRowBusy}
               onClick={() => {
-                const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
+                const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
                 if (item) void handleViewDetail(item);
               }}
-            >
-              {openingActionId === menuHistoryId ? "Đang mở..." : "Xem chi tiết"}
-            </button>
-            <button
-              type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
-              disabled={openingActionId != null}
+            />
+            <IconButton
+              label="In lại hóa đơn"
+              icon={<Icon icon={Printer} />}
+              variant="ghost"
+              size="sm"
+              isLoading={isRowPrinting}
+              isDisabled={isRowBusy}
               onClick={() => {
-                const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
-                if (item) void handleOpenEdit(item);
-              }}
-            >
-              Chỉnh sửa
-            </button>
-            <button
-              type="button"
-              className="w-full rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50"
-              disabled={openingActionId != null || reprintingHistoryId != null}
-              onClick={() => {
-                const item = histories.find((h) => h.lich_su_phong_id === menuHistoryId);
+                const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
                 if (item) void requestReprint(item);
               }}
-            >
-              In lại hóa đơn
-            </button>
-          </div>,
-          document.body,
-        )}
+            />
+            <MoreMenu
+              label="Thêm thao tác"
+              size="sm"
+              alignment="end"
+              items={[
+                {
+                  label: "Chỉnh sửa",
+                  isDisabled: isRowBusy,
+                  onClick: () => {
+                    const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
+                    if (item) void handleOpenEdit(item);
+                  },
+                },
+              ]}
+            />
+          </HStack>
+        );
+      },
+    },
+  ];
 
-      {/* Reprint confirm modal */}
+  /* ================================================================ */
+  /*  Render                                                           */
+  /* ================================================================ */
+
+  return (
+    <VStack gap={4} padding={4}>
+      <HStack gap={4} vAlign="end" wrap="wrap" hAlign="between">
+        <VStack gap={3}>
+          <VStack gap={0.5}>
+            <Heading level={2}>Lịch sử phòng</Heading>
+            <Text color="secondary">Theo dõi hóa đơn đã thanh toán và in lại khi cần.</Text>
+          </VStack>
+          <HStack gap={2} vAlign="end" wrap="wrap">
+            <DateInput
+              label="Từ ngày"
+              value={historyStart as ISODate}
+              onChange={(v) => {
+                if (v) onStartChange(v);
+              }}
+              format={(iso) => {
+                const [year, month, day] = iso.split("-");
+                return `${day}/${month}/${year}`;
+              }}
+              width={190}
+            />
+            <DateInput
+              label="Đến ngày"
+              value={historyEnd as ISODate}
+              onChange={(v) => {
+                if (v) onEndChange(v);
+              }}
+              format={(iso) => {
+                const [year, month, day] = iso.split("-");
+                return `${day}/${month}/${year}`;
+              }}
+              width={190}
+            />
+            <TextInput
+              label="Phòng"
+              type="search"
+              value={roomSearch}
+              onChange={setRoomSearch}
+              placeholder="Tên phòng"
+              startIcon="search"
+              hasClear
+              width={220}
+            />
+            <Button
+              label="Làm mới"
+              icon={<Icon icon={RefreshCw} />}
+              variant="secondary"
+              isLoading={filtering}
+              onClick={() => void handleFilter()}
+            />
+          </HStack>
+        </VStack>
+        <HStack gap={2} vAlign="stretch">
+          <Card padding={3} elevation="low">
+            <VStack gap={0.5} width={140}>
+              <Text type="supporting" color="secondary">Hóa đơn</Text>
+              <Text weight="bold" size="xl" hasTabularNumbers>
+                {filteredHistories.length.toLocaleString("vi-VN")}
+              </Text>
+            </VStack>
+          </Card>
+          <Card padding={3} elevation="low">
+            <VStack gap={0.5} width={180}>
+              <Text type="supporting" color="secondary">Tiền giờ</Text>
+              <Text weight="bold" size="xl" hasTabularNumbers>
+                {Math.round(totalHourFee).toLocaleString("vi-VN")}
+              </Text>
+            </VStack>
+          </Card>
+          <Card padding={3} elevation="low">
+            <VStack gap={0.5} width={180}>
+              <Text type="supporting" color="secondary">Doanh thu</Text>
+              <Text weight="bold" size="xl" hasTabularNumbers>
+                {Math.round(totalRevenue).toLocaleString("vi-VN")}
+              </Text>
+            </VStack>
+          </Card>
+        </HStack>
+      </HStack>
+
+      {/* ---- Reprint status banner ---- */}
+      {reprintStatus && (
+        <Banner
+          status={reprintStatus.type === "ok" ? "success" : "error"}
+          title={reprintStatus.message}
+          isDismissable
+          onDismiss={() => setReprintStatus(null)}
+          collapsible={false}
+        />
+      )}
+
+      {/* ---- Bulk-action toolbar ---- */}
+      {selectionState.hasSelection && (
+        <TableSelectionToolbar
+          selection={selectionState}
+          renderSelectionLabel={(count) => `Đã chọn ${count} hóa đơn`}
+          clearLabel="Bỏ chọn tất cả"
+          startContent={
+            <Button
+              label="Xóa mục đã chọn"
+              variant="destructive"
+              size="sm"
+              icon={<Icon icon={Trash2} />}
+              onClick={() => setDeleteIdsDialogOpen(true)}
+            />
+          }
+        />
+      )}
+
+      {/* ---- Data table ---- */}
+      <Card padding={0} elevation="low">
+        <Table<HistoryRow>
+          data={tableData}
+          columns={columns}
+          idKey="id"
+          density="balanced"
+          hasHover
+          isStriped
+          textOverflow="truncate"
+          plugins={{ selection: selectionPlugin, rowOpen: rowOpenPlugin }}
+          emptyState={
+            <EmptyState
+              title="Không có hóa đơn"
+              description="Không có hóa đơn nào trong khoảng ngày đã chọn."
+              isCompact
+            />
+          }
+        />
+      </Card>
+
+      {/* ============================================================ */}
+      {/*  Dialogs                                                      */}
+      {/* ============================================================ */}
+
+      {/* ---- Reprint confirm (ConfirmBillActionModal — already Astryx) ---- */}
       {reprintConfirmOpen && reprintTarget && (
         <ConfirmBillActionModal
           open={reprintConfirmOpen}
@@ -646,38 +742,45 @@ export function HistoryPage({
           }}
           onConfirm={() => void handleConfirmReprint()}
           leftContent={
-            <>
-              <p className="text-sm text-slate-600">
-                Bạn có muốn in lại hóa đơn <span className="font-semibold">#{reprintTarget.lich_su_phong_id}</span> của
-                phòng <span className="font-semibold">{reprintTarget.ten_phong}</span> không?
-              </p>
+            <VStack gap={3}>
+              <Text>
+                Bạn có muốn in lại hóa đơn{" "}
+                <Text weight="semibold">#{reprintTarget.lich_su_phong_id}</Text> của phòng{" "}
+                <Text weight="semibold">{reprintTarget.ten_phong}</Text> không?
+              </Text>
               {printBillQr ? (
-                <div className="mt-3">
-                  <label className="mb-1 block text-sm text-slate-600">Chọn QR in lại</label>
-                  <Select
-                    value={reprintSelectedQrId != null ? String(reprintSelectedQrId) : ""}
-                    onChange={(e) => {
-                      const id = Number(e.target.value);
+                <Selector
+                  label="Chọn QR in lại"
+                  hasClear
+                  placeholder="-- Chọn QR --"
+                  options={qrThanhToanOptions.map((opt) => ({
+                    value: String(opt.qr_thanh_toan_id),
+                    label: opt.qr_thanh_toan_ten,
+                  }))}
+                  value={reprintSelectedQrId != null ? String(reprintSelectedQrId) : null}
+                  onChange={(v) => {
+                    if (v == null) {
+                      setReprintSelectedQrId(null);
+                    } else {
+                      const id = Number(v);
                       setReprintSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
-                    }}
-                  >
-                    <option value="">-- Chọn QR --</option>
-                    {qrThanhToanOptions.map((item) => (
-                      <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                        {item.qr_thanh_toan_ten}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+                    }
+                  }}
+                />
               ) : (
-                <p className="mt-3 text-xs text-slate-500">
+                <Text type="supporting" color="secondary">
                   Đã tắt mã QR trong Cài đặt. Hóa đơn in lại sẽ không kèm QR.
-                </p>
+                </Text>
               )}
-              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                Tổng tiền: <span className="font-semibold">{Math.round(reprintTarget.tong_tien_thanh_toan).toLocaleString()}</span>
-              </div>
-            </>
+              <Card variant="muted" padding={3}>
+                <HStack hAlign="between" vAlign="center">
+                  <Text color="secondary">Tổng tiền</Text>
+                  <Text weight="semibold" hasTabularNumbers>
+                    {Math.round(reprintTarget.tong_tien_thanh_toan).toLocaleString()}
+                  </Text>
+                </HStack>
+              </Card>
+            </VStack>
           }
           rightContent={
             <BillTemplatePreview
@@ -702,353 +805,370 @@ export function HistoryPage({
         />
       )}
 
-      {/* Detail modal */}
+      {/* ---- Detail dialog ---- */}
       {detailOpen && selectedHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-[1px]">
-          <div className="relative w-[760px] max-w-[96vw] rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              onClick={() => setDetailOpen(false)}
-              aria-label="Đóng"
-            >
-              <X size={18} />
-            </button>
-            <h3 className="mb-4 text-lg font-semibold">Chi tiết hóa đơn #{selectedHistory.lich_su_phong_id}</h3>
-            <div className="mx-auto w-full max-w-[82mm] rounded-md border border-slate-200 bg-white p-3 text-[12px] font-mono shadow-sm">
-              <div className="text-center text-sm font-bold">PHIẾU THANH TOÁN</div>
-              <div className="mt-1 border-t border-dashed border-slate-300 pt-1 text-[11px]">
-                <div>Phòng: {selectedHistory.ten_phong}</div>
-                <div>Giờ vào: {formatDateTime(selectedHistory.gio_bat_dau)}</div>
-                <div>Giờ ra: {formatDateTime(selectedHistory.gio_ket_thuc)}</div>
-              </div>
-              <div className="mt-2 border-y border-dashed border-slate-300 py-1">
-                <div className="grid grid-cols-[1fr,40px,70px] font-semibold">
-                  <span>Tên món</span>
-                  <span className="text-right">SL</span>
-                  <span className="text-right">T.Tiền</span>
-                </div>
-                {historyItems.map((item) => (
-                  <div key={item.san_pham_id} className="grid grid-cols-[1fr,40px,70px]">
-                    <span className="truncate">{item.ten_san_pham}</span>
-                    <span className="text-right">{item.so_luong}</span>
-                    <span className="text-right">{Math.round(item.thanh_tien).toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-1 space-y-0.5 text-[11px]">
-                <div className="flex justify-between">
-                  <span>TIỀN MÓN</span>
-                  <span>{Math.round(selectedHistory.tong_tien_san_pham).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>TIỀN GIỜ</span>
-                  <span>{Math.round(selectedHistory.tong_tien_gio).toLocaleString()}</span>
-                </div>
-                <div className="mt-1 flex justify-between border-t border-dashed border-slate-300 pt-1 text-sm font-bold">
-                  <span>TỔNG CỘNG</span>
-                  <span>{Math.round(selectedHistory.tong_tien_thanh_toan).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-            <div className="mt-5 flex justify-end gap-2 border-t border-slate-200 pt-4">
-              <button className="btn-ghost" onClick={() => setDetailOpen(false)}>
-                Đóng
-              </button>
-              <button
-                className="btn-secondary"
+        <Dialog
+          isOpen={detailOpen}
+          onOpenChange={(next) => {
+            if (!next) setDetailOpen(false);
+          }}
+          width={760}
+          purpose="info"
+          padding={0}
+        >
+          <VStack>
+            <DialogHeader
+              title={`Chi tiết hóa đơn #${selectedHistory.lich_su_phong_id}`}
+              onOpenChange={(next) => {
+                if (!next) setDetailOpen(false);
+              }}
+            />
+            <VStack padding={5} hAlign="center">
+              <BillTemplatePreview
+                title="PHIẾU THANH TOÁN"
+                roomName={selectedHistory.ten_phong}
+                startedAt={formatDateTime(selectedHistory.gio_bat_dau)}
+                endedAt={formatDateTime(selectedHistory.gio_ket_thuc)}
+                billNumber={selectedHistory.lich_su_phong_id}
+                items={historyItems.map((item) => ({
+                  id: `detail-pv-${item.san_pham_id}`,
+                  name: item.ten_san_pham,
+                  qty: item.so_luong,
+                  unitPrice: item.don_gia,
+                  amount: item.thanh_tien,
+                }))}
+                productTotal={selectedHistory.tong_tien_san_pham}
+                hourTotal={selectedHistory.tong_tien_gio}
+                grandTotal={selectedHistory.tong_tien_thanh_toan}
+                qrDataUrl=""
+                size="large"
+              />
+            </VStack>
+            <Divider />
+            <HStack gap={2} hAlign="end" padding={4}>
+              <Button label="Đóng" variant="ghost" onClick={() => setDetailOpen(false)} />
+              <Button
+                label="Chỉnh sửa"
+                variant="secondary"
                 onClick={() => {
                   setDetailOpen(false);
                   void handleOpenEdit(selectedHistory);
                 }}
-              >
-                Chỉnh sửa
-              </button>
-            </div>
-          </div>
-        </div>
+              />
+            </HStack>
+          </VStack>
+        </Dialog>
       )}
 
-      {/* Edit paid bill modal */}
+      {/* ---- Edit dialog ---- */}
       {editOpen && editingHistory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-[1px]">
-          <div className="relative flex max-h-[92vh] w-[1180px] max-w-[97vw] flex-col rounded-xl border border-slate-200 bg-white shadow-2xl">
-            <button
-              type="button"
-              className="absolute right-3 top-3 z-10 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              disabled={savingEdit}
-              onClick={() => setEditOpen(false)}
-              aria-label="Đóng"
-            >
-              <X size={18} />
-            </button>
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h3 className="text-lg font-semibold">Chỉnh sửa hóa đơn #{editingHistory.lich_su_phong_id}</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Sửa tiền giờ, số lượng, thêm món mới hoặc đặt SL = 0 để xóa món trên hóa đơn đã thanh toán.
-              </p>
-            </div>
+        <Dialog
+          isOpen={editOpen}
+          onOpenChange={(next) => {
+            if (!next && !savingEdit) setEditOpen(false);
+          }}
+          width={1180}
+          maxHeight="92dvh"
+          purpose="form"
+          padding={0}
+        >
+          <VStack>
+            <DialogHeader
+              title={`Chỉnh sửa hóa đơn #${editingHistory.lich_su_phong_id}`}
+              subtitle="Sửa tiền giờ, số lượng, thêm món hoặc gỡ món khỏi hóa đơn đã thanh toán."
+              onOpenChange={(next) => {
+                if (!next && !savingEdit) setEditOpen(false);
+              }}
+            />
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-5 lg:grid-cols-[1fr_320px]">
-              <div className="min-h-0 overflow-y-auto pr-1">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Tiền giờ</label>
-                      <input
-                        className="app-input w-full"
-                        disabled={savingEdit}
-                        value={editTienGio}
-                        inputMode="numeric"
-                        onChange={(e) => {
-                          const nextHour = formatMoneyInput(e.target.value);
-                          setEditTienGio(nextHour);
-                          recalcEditTotal(editLines, editQtyByProductId, nextHour);
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-slate-700">Tổng tiền</label>
-                      <input
-                        className="app-input w-full"
-                        disabled={savingEdit}
-                        value={editTongTien}
-                        inputMode="numeric"
-                        onChange={(e) => setEditTongTien(formatMoneyInput(e.target.value))}
-                      />
-                    </div>
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                      <p>Phòng: <span className="font-semibold text-slate-800">{editingHistory.ten_phong}</span></p>
-                      <p>Giờ vào: {formatDateTime(editingHistory.gio_bat_dau)}</p>
-                      <p>Giờ ra: {formatDateTime(editingHistory.gio_ket_thuc)}</p>
-                    </div>
-                  </div>
-                </div>
+            <HStack gap={4} padding={5} wrap="wrap" vAlign="start" isScrollable>
+              {/* ---- Left: edit form ---- */}
+              <VStack gap={3} width="100%" style={{ flex: 1, minWidth: "24rem" }}>
+                {/* Money inputs + room info */}
+                <Card variant="muted" padding={3}>
+                  <HStack gap={3} wrap="wrap" vAlign="end">
+                    <TextInput
+                      label="Tiền giờ"
+                      value={editTienGio}
+                      onChange={(v) => {
+                        const nextHour = formatMoneyInput(v);
+                        setEditTienGio(nextHour);
+                        recalcEditTotal(editLines, editQtyByProductId, nextHour);
+                      }}
+                      inputMode="numeric"
+                      isDisabled={savingEdit}
+                      width={180}
+                    />
+                    <TextInput
+                      label="Tổng tiền"
+                      value={editTongTien}
+                      onChange={(v) => setEditTongTien(formatMoneyInput(v))}
+                      inputMode="numeric"
+                      isDisabled={savingEdit}
+                      width={180}
+                    />
+                    <VStack gap={0.5} style={{ flex: 1 }}>
+                      <Text type="supporting" color="secondary">
+                        Phòng: <Text weight="bold">{editingHistory.ten_phong}</Text>
+                      </Text>
+                      <Text type="supporting" color="secondary">
+                        Giờ vào: {formatDateTime(editingHistory.gio_bat_dau)}
+                      </Text>
+                      <Text type="supporting" color="secondary">
+                        Giờ ra: {formatDateTime(editingHistory.gio_ket_thuc)}
+                      </Text>
+                    </VStack>
+                  </HStack>
+                </Card>
 
-                <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
-                  <div className="grid grid-cols-[1fr,110px,120px,140px] border-b bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                    <span>Tên món</span>
-                    <span className="text-center">SL</span>
-                    <span className="text-right">Đơn giá</span>
-                    <span className="text-right">Thành tiền mới</span>
-                  </div>
-                  {editLines.map((item) => {
-                    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
-                    const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
-                    const thanhTienMoi = qtySafe * item.don_gia;
-                    return (
-                      <div key={item.san_pham_id} className="grid grid-cols-[1fr,110px,120px,140px] items-center border-b px-3 py-2 text-sm last:border-b-0">
-                        <span className="font-medium text-slate-800">{item.ten_san_pham}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          className="app-input h-8"
-                          disabled={savingEdit}
-                          value={editQtyByProductId[item.san_pham_id] ?? "0"}
-                          onChange={(e) => {
-                            const nextQty = {
-                              ...editQtyByProductId,
-                              [item.san_pham_id]: e.target.value,
-                            };
-                            setEditQtyByProductId(nextQty);
-                            recalcEditTotal(editLines, nextQty, editTienGio);
-                          }}
-                        />
-                        <span className="text-right text-slate-700">{item.don_gia.toLocaleString()}</span>
-                        <span className="text-right font-semibold text-slate-800">{thanhTienMoi.toLocaleString()}</span>
-                      </div>
-                    );
-                  })}
-                  {editLines.length === 0 && (
-                    <div className="px-3 py-4 text-sm text-slate-500">Chưa có món. Thêm món từ danh sách bên dưới.</div>
-                  )}
-                </div>
-
-                <div className="mt-3 rounded-lg border border-slate-200 p-3">
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Thêm món vào hóa đơn</label>
-                  <input
-                    className="app-input w-full"
-                    placeholder="Tìm món để thêm..."
-                    disabled={savingEdit}
-                    value={editProductKeyword}
-                    onChange={(e) => setEditProductKeyword(e.target.value)}
-                  />
-                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
-                    {addableProducts.slice(0, 20).map((product) => (
-                      <button
-                        key={product.san_pham_id}
-                        type="button"
-                        disabled={savingEdit}
-                        className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-slate-50 disabled:opacity-50"
-                        onClick={() => {
-                          const nextLines = [
-                            ...editLines,
-                            {
-                              san_pham_id: product.san_pham_id,
-                              ten_san_pham: product.ten_san_pham,
-                              don_gia: product.don_gia,
-                            },
-                          ];
-                          const nextQty = {
-                            ...editQtyByProductId,
-                            [product.san_pham_id]: "1",
-                          };
-                          setEditLines(nextLines);
-                          setEditQtyByProductId(nextQty);
-                          setEditProductKeyword("");
-                          recalcEditTotal(nextLines, nextQty, editTienGio);
-                        }}
-                      >
-                        <span className="font-medium text-slate-800">{product.ten_san_pham}</span>
-                        <span className="text-slate-600">{product.don_gia.toLocaleString()}</span>
-                      </button>
-                    ))}
-                    {addableProducts.length === 0 && (
-                      <p className="px-1 py-2 text-sm text-slate-500">Không còn món phù hợp để thêm.</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Đặt số lượng = 0 để xóa món khỏi hóa đơn đã thanh toán. In sau khi lưu là tùy chọn, không bắt buộc máy in để lưu.
-                </div>
-                <div className="mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
-                  <Checkbox
-                    checked={editPrintAfterSave}
-                    disabled={savingEdit}
-                    onCheckedChange={(checked) => setEditPrintAfterSave(checked === true)}
-                  />
-                  <span className="text-slate-700">In hóa đơn sau khi lưu chỉnh sửa</span>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <h4 className="mb-2 text-sm font-semibold text-slate-700">Xem Trước Hóa Đơn</h4>
-                <div className="mx-auto w-full max-w-[80mm] rounded border border-slate-200 bg-white p-3 text-[12px] font-mono shadow-sm">
-                  <div className="text-center text-sm font-bold">PHIẾU THANH TOÁN</div>
-                  <div className="mt-1 border-y border-dashed border-slate-300 py-1">
-                    {editLines.map((item) => {
+                {/* Editable items */}
+                <Card padding={0}>
+                  <VStack gap={0}>
+                    <HStack gap={2} padding={3} vAlign="center">
+                      <VStack style={{ flex: 1 }}>
+                        <Text type="label" weight="semibold">Tên món</Text>
+                      </VStack>
+                      <VStack width={90} hAlign="center">
+                        <Text type="label" weight="semibold">SL</Text>
+                      </VStack>
+                      <VStack width={100} hAlign="end">
+                        <Text type="label" weight="semibold">Đơn giá</Text>
+                      </VStack>
+                      <VStack width={120} hAlign="end">
+                        <Text type="label" weight="semibold">Thành tiền mới</Text>
+                      </VStack>
+                      <VStack width={36} />
+                    </HStack>
+                    <Divider />
+                    {editLines.map((item, index) => {
                       const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
                       const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
+                      const thanhTienMoi = qtySafe * item.don_gia;
                       return (
-                        <div key={`pv-${item.san_pham_id}`} className="grid grid-cols-[1fr,40px,70px] text-[11px]">
-                          <span className="truncate">{item.ten_san_pham}</span>
-                          <span className="text-right">{qtySafe}</span>
-                          <span className="text-right">{Math.round(qtySafe * item.don_gia).toLocaleString()}</span>
-                        </div>
+                        <Fragment key={item.san_pham_id}>
+                          <HStack gap={2} padding={3} vAlign="center">
+                            <VStack style={{ flex: 1, minWidth: 0 }}>
+                              <Text weight="medium" maxLines={1}>{item.ten_san_pham}</Text>
+                            </VStack>
+                            <TextInput
+                              label={`Số lượng ${item.ten_san_pham}`}
+                              isLabelHidden
+                              value={editQtyByProductId[item.san_pham_id] ?? "0"}
+                              onChange={(v) => {
+                                const nextQty = { ...editQtyByProductId, [item.san_pham_id]: v };
+                                setEditQtyByProductId(nextQty);
+                                recalcEditTotal(editLines, nextQty, editTienGio);
+                              }}
+                              inputMode="numeric"
+                              isDisabled={savingEdit}
+                              width={90}
+                              size="sm"
+                            />
+                            <VStack width={100} hAlign="end">
+                              <Text color="secondary" hasTabularNumbers>
+                                {item.don_gia.toLocaleString()}
+                              </Text>
+                            </VStack>
+                            <VStack width={120} hAlign="end">
+                              <Text weight="semibold" hasTabularNumbers>
+                                {thanhTienMoi.toLocaleString()}
+                              </Text>
+                            </VStack>
+                            <IconButton
+                              label={`Xóa ${item.ten_san_pham}`}
+                              icon={<Icon icon={Trash2} />}
+                              variant="ghost"
+                              size="sm"
+                              isDisabled={savingEdit}
+                              onClick={() => {
+                                const nextLines = editLines.filter(
+                                  (line) => line.san_pham_id !== item.san_pham_id,
+                                );
+                                const nextQty = { ...editQtyByProductId };
+                                delete nextQty[item.san_pham_id];
+                                const wasOnBill = historyItems.some(
+                                  (row) => row.san_pham_id === item.san_pham_id,
+                                );
+                                if (wasOnBill) {
+                                  setRemovedProductIds((current) =>
+                                    current.includes(item.san_pham_id)
+                                      ? current
+                                      : [...current, item.san_pham_id],
+                                  );
+                                }
+                                setEditLines(nextLines);
+                                setEditQtyByProductId(nextQty);
+                                recalcEditTotal(nextLines, nextQty, editTienGio);
+                              }}
+                            />
+                          </HStack>
+                          {index < editLines.length - 1 && <Divider />}
+                        </Fragment>
                       );
                     })}
-                  </div>
-                  <div className="mt-1 space-y-0.5 text-[11px]">
-                    <div className="flex justify-between">
-                      <span>TIỀN MÓN</span>
-                      <span>{Math.round(editTongTienMon).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>TIỀN GIỜ</span>
-                      <span>{parseMoneyInput(editTienGio || "0").toLocaleString()}</span>
-                    </div>
-                    <div className="mt-1 flex justify-between border-t border-dashed border-slate-300 pt-1 text-sm font-bold">
-                      <span>TỔNG CỘNG</span>
-                      <span>{parseMoneyInput(editTongTien || "0").toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+                    {editLines.length === 0 && (
+                      <VStack padding={4} hAlign="center">
+                        <Text color="secondary" type="supporting">
+                          Chưa có món. Thêm món từ danh sách bên dưới.
+                        </Text>
+                      </VStack>
+                    )}
+                  </VStack>
+                </Card>
 
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-              <button className="btn-ghost" disabled={savingEdit} onClick={() => setEditOpen(false)}>
-                Hủy
-              </button>
-              <button
-                className="btn-secondary inline-flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-                disabled={savingEdit}
+                {/* Add product search */}
+                <Card padding={3}>
+                  <VStack gap={2}>
+                    <Text weight="semibold" type="label">Thêm món vào hóa đơn</Text>
+                    <TextInput
+                      label="Tìm món"
+                      isLabelHidden
+                      value={editProductKeyword}
+                      onChange={setEditProductKeyword}
+                      placeholder="Tìm món để thêm..."
+                      isDisabled={savingEdit}
+                      hasClear
+                      startIcon="search"
+                      size="sm"
+                    />
+                    <VStack gap={0.5} isScrollable style={{ maxHeight: "10rem" }}>
+                      {addableProducts.slice(0, 20).map((product) => (
+                        <HStack key={product.san_pham_id} gap={2} vAlign="center" padding={1}>
+                          <VStack style={{ flex: 1, minWidth: 0 }}>
+                            <Text weight="medium" maxLines={1}>{product.ten_san_pham}</Text>
+                          </VStack>
+                          <Text color="secondary" hasTabularNumbers type="supporting">
+                            {product.don_gia.toLocaleString()}
+                          </Text>
+                          <IconButton
+                            label={`Thêm ${product.ten_san_pham}`}
+                            icon={<Icon icon={Plus} />}
+                            variant="ghost"
+                            size="sm"
+                            isDisabled={savingEdit}
+                            onClick={() => {
+                              const nextLines = [
+                                ...editLines,
+                                {
+                                  san_pham_id: product.san_pham_id,
+                                  ten_san_pham: product.ten_san_pham,
+                                  don_gia: product.don_gia,
+                                },
+                              ];
+                              const nextQty = { ...editQtyByProductId, [product.san_pham_id]: "1" };
+                              setEditLines(nextLines);
+                              setEditQtyByProductId(nextQty);
+                              setRemovedProductIds((current) =>
+                                current.filter((id) => id !== product.san_pham_id),
+                              );
+                              setEditProductKeyword("");
+                              recalcEditTotal(nextLines, nextQty, editTienGio);
+                            }}
+                          />
+                        </HStack>
+                      ))}
+                      {addableProducts.length === 0 && (
+                        <Text color="secondary" type="supporting">
+                          Không còn món phù hợp để thêm.
+                        </Text>
+                      )}
+                    </VStack>
+                  </VStack>
+                </Card>
+
+                <Banner
+                  status="warning"
+                  title="Bấm thùng rác để gỡ món khỏi hóa đơn. In sau khi lưu là tùy chọn, không bắt buộc máy in để lưu."
+                  collapsible={false}
+                />
+
+                <CheckboxInput
+                  label="In hóa đơn sau khi lưu chỉnh sửa"
+                  value={editPrintAfterSave}
+                  isDisabled={savingEdit}
+                  onChange={(checked) => setEditPrintAfterSave(checked)}
+                />
+              </VStack>
+
+              {/* ---- Right: bill preview ---- */}
+              <VStack gap={2} width={320}>
+                <Heading level={4}>Xem Trước Hóa Đơn</Heading>
+                <BillTemplatePreview
+                  title="PHIẾU THANH TOÁN"
+                  roomName={editingHistory.ten_phong}
+                  startedAt={formatDateTime(editingHistory.gio_bat_dau)}
+                  endedAt={formatDateTime(editingHistory.gio_ket_thuc)}
+                  billNumber={editingHistory.lich_su_phong_id}
+                  items={editLines.map((item) => {
+                    const qty = Number(editQtyByProductId[item.san_pham_id] ?? 0);
+                    const qtySafe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
+                    return {
+                      id: `edit-pv-${item.san_pham_id}`,
+                      name: item.ten_san_pham,
+                      qty: qtySafe,
+                      unitPrice: item.don_gia,
+                      amount: Math.round(qtySafe * item.don_gia),
+                    };
+                  })}
+                  productTotal={editTongTienMon}
+                  hourTotal={parseMoneyInput(editTienGio || "0")}
+                  grandTotal={parseMoneyInput(editTongTien || "0")}
+                  qrDataUrl=""
+                />
+              </VStack>
+            </HStack>
+
+            <Divider />
+            <HStack gap={2} hAlign="end" padding={4}>
+              <Button
+                label="Hủy"
+                variant="ghost"
+                isDisabled={savingEdit}
+                onClick={() => setEditOpen(false)}
+              />
+              <Button
+                label={savingEdit ? "Đang lưu..." : "Lưu chỉnh sửa"}
+                variant="primary"
+                isLoading={savingEdit}
                 onClick={() => void handleSaveEdit()}
-              >
-                {savingEdit ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Đang lưu...
-                  </>
-                ) : (
-                  "Lưu chỉnh sửa"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+              />
+            </HStack>
+          </VStack>
+        </Dialog>
       )}
 
-      {/* AlertDialog: Confirm delete by IDs */}
-      <AlertDialog open={deleteIdsDialogOpen} onOpenChange={setDeleteIdsDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-rose-600">Xác nhận xóa hóa đơn</AlertDialogTitle>
-            <AlertDialogDescription>
-              Bạn sắp xóa <strong>{selectedIds.size}</strong> hóa đơn đã thanh toán.
+      {/* ---- Delete by IDs confirm ---- */}
+      <Dialog
+        isOpen={deleteIdsDialogOpen}
+        onOpenChange={setDeleteIdsDialogOpen}
+        width={420}
+        purpose="form"
+      >
+        <VStack>
+          <DialogHeader title="Xác nhận xóa hóa đơn" onOpenChange={setDeleteIdsDialogOpen} />
+          <VStack gap={3} padding={5}>
+            <Text>
+              Bạn sắp xóa <Text weight="bold">{selectionState.selectedCount}</Text> hóa đơn đã thanh toán.
               Hành động này không thể hoàn tác. Dữ liệu sau khi xóa sẽ mất vĩnh viễn.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Hủy</AlertDialogCancel>
-            <AlertDialogAction
+            </Text>
+          </VStack>
+          <Divider />
+          <HStack gap={2} hAlign="end" padding={4}>
+            <Button
+              label="Hủy"
+              variant="ghost"
+              isDisabled={deleting}
+              onClick={() => setDeleteIdsDialogOpen(false)}
+            />
+            <Button
+              label={deleting ? "Đang xóa..." : "Xóa"}
               variant="destructive"
-              disabled={deleting}
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDeleteByIds();
-              }}
-            >
-              {deleting ? "Đang xóa..." : "Xóa"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* AlertDialog: Confirm delete by date range */}
-      <AlertDialog open={deleteRangeDialogOpen} onOpenChange={setDeleteRangeDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-rose-600">Xóa hóa đơn theo khoảng ngày</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>
-                  Bạn sắp xóa <strong>tất cả</strong> hóa đơn đã thanh toán từ{" "}
-                  <strong>{rangeStart}</strong> đến <strong>{rangeEnd}</strong>.
-                </p>
-                <p className="font-semibold text-rose-600">
-                  Hành động này không thể hoàn tác!
-                </p>
-                <p>
-                  Nhập <strong className="font-mono">XOA</strong> để xác nhận:
-                </p>
-                <input
-                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm font-mono tracking-widest"
-                  placeholder="Nhập XOA"
-                  value={rangeConfirmText}
-                  onChange={(e) => setRangeConfirmText(e.target.value.toUpperCase())}
-                />
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting} onClick={() => setRangeConfirmText("")}>
-              Hủy
-            </AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={deleting || rangeConfirmText !== "XOA"}
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDeleteByRange();
-              }}
-            >
-              {deleting ? "Đang xóa..." : "Xóa theo khoảng ngày"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
+              isLoading={deleting}
+              onClick={() => void confirmDeleteByIds()}
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+    </VStack>
   );
 }

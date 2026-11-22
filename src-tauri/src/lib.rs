@@ -58,6 +58,7 @@ pub fn run() {
             commands::update_paid_history_bill,
             commands::delete_history_by_ids,
             commands::delete_history_by_range,
+            commands::cleanup_room_data,
             csv_import::export_csv_templates,
             csv_import::export_nhom_san_pham_template,
             csv_import::export_san_pham_template,

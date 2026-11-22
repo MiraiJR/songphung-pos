@@ -8,6 +8,8 @@ pub struct Room {
     pub ten_phong: String,
     pub tien_gio: f64,
     pub trang_thai: String,
+    pub gio_bat_dau: Option<String>,
+    pub tong_tien_san_pham: f64,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -880,7 +882,22 @@ pub async fn seed_demo_data(state: tauri::State<'_, DbState>) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn list_rooms(state: tauri::State<'_, DbState>) -> Result<Vec<Room>, String> {
-    sqlx::query_as::<_, Room>("SELECT phong_id, ten_phong, CAST(tien_gio AS REAL) AS tien_gio, trang_thai FROM phong ORDER BY phong_id")
+    sqlx::query_as::<_, Room>(
+        "SELECT p.phong_id, p.ten_phong, CAST(p.tien_gio AS REAL) AS tien_gio, p.trang_thai,
+                lsp.gio_bat_dau,
+                CAST(COALESCE((
+                  SELECT SUM(ct.so_luong * ct.don_gia)
+                  FROM lich_su_phong_san_pham ct
+                  WHERE ct.lich_su_phong_id = lsp.lich_su_phong_id
+                ), 0) AS REAL) AS tong_tien_san_pham
+         FROM phong p
+         LEFT JOIN lich_su_phong lsp ON lsp.lich_su_phong_id = (
+           SELECT lich_su_phong_id FROM lich_su_phong
+           WHERE phong_id = p.phong_id AND trang_thai = 'DANG_PHUC_VU'
+           ORDER BY lich_su_phong_id DESC LIMIT 1
+         )
+         ORDER BY p.phong_id",
+    )
         .fetch_all(state.pool())
         .await
         .map_err(|e| e.to_string())
@@ -1481,34 +1498,47 @@ pub async fn get_current_session(
 pub async fn list_paid_history(
     state: tauri::State<'_, DbState>,
     date: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
 ) -> Result<Vec<PaidHistory>, String> {
     let pool = state.pool();
-    if let Some(day) = date {
-        sqlx::query_as::<_, PaidHistory>(
-            "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
+    let sql = "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
                     CAST(lsp.tong_tien_san_pham AS REAL) AS tong_tien_san_pham,
                     CAST(lsp.tong_tien_gio AS REAL) AS tong_tien_gio,
                     CAST(lsp.tong_tien_thanh_toan AS REAL) AS tong_tien_thanh_toan
              FROM lich_su_phong lsp
-             JOIN phong p ON p.phong_id = lsp.phong_id
+             JOIN phong p ON p.phong_id = lsp.phong_id";
+
+    if let (Some(start), Some(end)) = (start_date.filter(|v| !v.is_empty()), end_date.filter(|v| !v.is_empty())) {
+        let (from, to) = if start <= end { (start, end) } else { (end, start) };
+        sqlx::query_as::<_, PaidHistory>(&format!(
+            "{sql}
+             WHERE lsp.trang_thai = 'DA_THANH_TOAN'
+               AND date(lsp.gio_ket_thuc) >= date(?)
+               AND date(lsp.gio_ket_thuc) <= date(?)
+             ORDER BY lsp.gio_ket_thuc DESC"
+        ))
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())
+    } else if let Some(day) = date.filter(|v| !v.is_empty()) {
+        sqlx::query_as::<_, PaidHistory>(&format!(
+            "{sql}
              WHERE lsp.trang_thai = 'DA_THANH_TOAN' AND date(lsp.gio_ket_thuc) = date(?)
-             ORDER BY lsp.gio_ket_thuc DESC",
-        )
+             ORDER BY lsp.gio_ket_thuc DESC"
+        ))
         .bind(day)
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())
     } else {
-        sqlx::query_as::<_, PaidHistory>(
-            "SELECT lsp.lich_su_phong_id, lsp.phong_id, p.ten_phong, lsp.gio_bat_dau, lsp.gio_ket_thuc,
-                    CAST(lsp.tong_tien_san_pham AS REAL) AS tong_tien_san_pham,
-                    CAST(lsp.tong_tien_gio AS REAL) AS tong_tien_gio,
-                    CAST(lsp.tong_tien_thanh_toan AS REAL) AS tong_tien_thanh_toan
-             FROM lich_su_phong lsp
-             JOIN phong p ON p.phong_id = lsp.phong_id
+        sqlx::query_as::<_, PaidHistory>(&format!(
+            "{sql}
              WHERE lsp.trang_thai = 'DA_THANH_TOAN'
-             ORDER BY lsp.gio_ket_thuc DESC",
-        )
+             ORDER BY lsp.gio_ket_thuc DESC"
+        ))
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())
@@ -1842,4 +1872,73 @@ pub async fn delete_history_by_range(
 
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(result.rows_affected())
+}
+
+#[tauri::command]
+pub async fn cleanup_room_data(
+    state: tauri::State<'_, DbState>,
+    mode: String,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<String, String> {
+    let pool = state.pool();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let deleted = match mode.as_str() {
+        "paid_range" => {
+            let start = start_date
+                .filter(|v| !v.is_empty())
+                .ok_or("Chọn ngày bắt đầu.")?;
+            let end = end_date.filter(|v| !v.is_empty()).ok_or("Chọn ngày kết thúc.")?;
+            let (from, to) = if start <= end { (start, end) } else { (end, start) };
+            sqlx::query(
+                "DELETE FROM lich_su_phong
+                 WHERE trang_thai = 'DA_THANH_TOAN'
+                   AND date(gio_ket_thuc) >= date(?)
+                   AND date(gio_ket_thuc) <= date(?)",
+            )
+            .bind(from)
+            .bind(to)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .rows_affected()
+        }
+        "paid_all" => sqlx::query("DELETE FROM lich_su_phong WHERE trang_thai = 'DA_THANH_TOAN'")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .rows_affected(),
+        "active" => {
+            sqlx::query(
+                "UPDATE phong SET trang_thai = 'TRONG'
+                 WHERE phong_id IN (
+                   SELECT phong_id FROM lich_su_phong WHERE trang_thai = 'DANG_PHUC_VU'
+                 )",
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM lich_su_phong WHERE trang_thai = 'DANG_PHUC_VU'")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?
+                .rows_affected()
+        }
+        "all" => {
+            sqlx::query("UPDATE phong SET trang_thai = 'TRONG'")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM lich_su_phong")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?
+                .rows_affected()
+        }
+        _ => return Err("Cách dọn dẹp không hợp lệ.".to_string()),
+    };
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(format!("Đã xóa {deleted} bản ghi phòng hát."))
 }

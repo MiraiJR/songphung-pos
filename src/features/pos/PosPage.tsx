@@ -1,8 +1,77 @@
-import { useMemo, useState } from "react";
-import { Loader2, Pencil, Search, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { ClickableCard } from "@astryxdesign/core/ClickableCard";
+import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Divider } from "@astryxdesign/core/Divider";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ROOM_STATUS_LABEL } from "@/types/karaoke";
 import type { CurrentSession, OrderItem, Product, ProductGroup, Room } from "@/types/karaoke";
 import { formatDateTime } from "@/utils/formatDateTime";
+
+function parseLocalDateTime(raw: string): Date | null {
+  const match = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return null;
+  return new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6] ?? 0),
+  );
+}
+
+function formatElapsed(startRaw: string, now: number): string {
+  const start = parseLocalDateTime(startRaw);
+  if (!start) return "--";
+  const minutes = Math.max(0, Math.floor((now - start.getTime()) / 60000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours <= 0 ? `${rest} phút` : `${hours} giờ ${rest} phút`;
+}
+
+function roomRunningTotal(room: Room, now: number): number | null {
+  if (room.trang_thai !== "DANG_HOAT_DONG" || !room.gio_bat_dau) return null;
+  const start = parseLocalDateTime(room.gio_bat_dau);
+  if (!start) return null;
+  const minutes = Math.max(0, Math.floor((now - start.getTime()) / 60000));
+  const hourFee = Math.ceil((minutes * room.tien_gio) / 60);
+  return hourFee + Math.ceil(room.tong_tien_san_pham ?? 0);
+}
+
+function RoomTile({ room, now }: { room: Room; now: number }) {
+  const running = roomRunningTotal(room, now);
+  return (
+    <VStack gap={0.5}>
+      <HStack hAlign="between" vAlign="center">
+        <Text weight="semibold">{room.ten_phong}</Text>
+        <Text size="2xs" color="secondary">
+          {ROOM_STATUS_LABEL[room.trang_thai]}
+        </Text>
+      </HStack>
+      {room.trang_thai === "DANG_HOAT_DONG" && room.gio_bat_dau ? (
+        <>
+          <Text size="sm">{formatElapsed(room.gio_bat_dau, now)}</Text>
+          <Text weight="bold" hasTabularNumbers>
+            {(running ?? 0).toLocaleString("vi-VN")}
+          </Text>
+        </>
+      ) : (
+        <Text size="sm" color="secondary">
+          {Math.ceil(room.tien_gio).toLocaleString("vi-VN")} đ/giờ
+        </Text>
+      )}
+    </VStack>
+  );
+}
 
 type Props = {
   rooms: Room[];
@@ -12,11 +81,11 @@ type Props = {
   selectedRoom: Room | null;
   currentSession: CurrentSession | null;
   onSelectRoom: (roomId: number) => void;
-  onStartRoom: (roomId: number) => void;
-  onOpenOrderModal: (product: Product, initialQty: number) => void;
+  onStartRoom: (roomId: number) => void | Promise<void>;
+  onAddProduct: (product: Product) => void | Promise<void>;
   onAdjustItemQty: (item: OrderItem, delta: number) => void;
   onEditItem: (item: OrderItem) => void;
-  onRemoveItem: (item: OrderItem) => void;
+  onRefreshRooms: () => void | Promise<void>;
   onCancelRoom: () => void;
   onCheckout: () => void;
   onTransferRoom: (targetRoomId: number) => Promise<void>;
@@ -36,10 +105,10 @@ export function PosPage(props: Props) {
     currentSession,
     onSelectRoom,
     onStartRoom,
-    onOpenOrderModal,
+    onAddProduct,
     onAdjustItemQty,
     onEditItem,
-    onRemoveItem,
+    onRefreshRooms,
     onCancelRoom,
     onCheckout,
     onTransferRoom,
@@ -53,6 +122,16 @@ export function PosPage(props: Props) {
   const [activeGroupId, setActiveGroupId] = useState<string>("ALL");
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [startingRoom, setStartingRoom] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      void onRefreshRooms();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [onRefreshRooms]);
 
   const groupTabs = useMemo(() => {
     const base = groups
@@ -95,327 +174,321 @@ export function PosPage(props: Props) {
     [rooms, selectedRoomId],
   );
 
+  // Keep CSS grid for the 3-column POS frame (proven stable). Astryx for chrome inside.
   return (
-    <section className="grid h-[calc(100vh-61px)] grid-cols-10 gap-3 overflow-hidden bg-slate-100 p-3">
-      <aside className="app-card col-span-3 flex min-h-0 flex-col overflow-hidden p-0">
-        <div className="border-b border-slate-200 p-3">
-          <div className="flex items-start justify-between">
-            <h2 className="text-2xl font-bold text-slate-800">{selectedRoom ? selectedRoom.ten_phong : "--"}</h2>
-            <div className="text-right">
-              <div className="text-xs text-slate-500">Bắt đầu: {formatDateTime(currentSession?.gio_bat_dau)}</div>
-            </div>
-          </div>
-          {selectedRoom && (
-            <div className="mt-2 inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">
-              {ROOM_STATUS_LABEL[selectedRoom.trang_thai]}
-            </div>
-          )}
-        </div>
-
-        <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
-          {currentSession?.items.map((item) => (
-            <div key={item.lich_su_phong_san_pham_id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
-              <div className="grid grid-cols-[auto,1fr,100px] gap-2 text-sm">
-                <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-slate-600">
-                  <button
-                    type="button"
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
-                    onClick={() => onAdjustItemQty(item, -1)}
-                  >
-                    -
-                  </button>
-                  <span className="min-w-[1ch] tabular-nums font-semibold">{item.so_luong}</span>
-                  <button
-                    type="button"
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded bg-slate-200 hover:bg-slate-300"
-                    onClick={() => onAdjustItemQty(item, 1)}
-                  >
-                    +
-                  </button>
-                </div>
-                <div>
-                  <div className="font-medium">{item.ten_san_pham}</div>
-                  <div className="text-xs text-slate-500">{item.don_gia.toLocaleString()}</div>
-                </div>
-                <div className="text-right font-semibold">{item.thanh_tien.toLocaleString()}</div>
-              </div>
-              <div className="mt-1 flex justify-end gap-1">
-                <div className="flex gap-1">
-                  <button
-                    className="rounded p-1 hover:bg-slate-200"
-                    onClick={() => onEditItem(item)}
-                    title="Sửa số lượng"
-                  >
-                    <Pencil size={14} />
-                  </button>
-                  <button
-                    className="rounded p-1 text-rose-700 hover:bg-rose-100"
-                    onClick={() => onRemoveItem(item)}
-                    title="Xóa món"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        {selectedRoom?.trang_thai === "DANG_HOAT_DONG" && (
-          <div className="border-t border-slate-200 p-3">
-            <div className="mb-2 space-y-1 text-sm text-slate-600">
-              <div className="flex items-center justify-between">
-                <span>Tổng giờ</span>
-                <span className="font-semibold text-slate-800">
-                  {totalDurationLabel}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Tiền món</span>
-                <span className="font-semibold text-slate-800">
-                  {tongTienMonDisplay.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Tiền giờ</span>
-                <span className="font-semibold text-slate-800">
-                  {tongTienGioDisplay.toLocaleString()}
-                </span>
-              </div>
-            </div>
-            <div className="text-xl font-bold text-slate-800">
-              Tổng cộng{" "}
-              <span className="float-right text-4xl text-primary">
-                {tongCongDisplay.toLocaleString()}
-              </span>
-            </div>
-            {currentSession ? (
-              <>
-                <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className="btn-primary inline-flex min-w-0 w-full items-center justify-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                    disabled={actionBusy}
-                    aria-busy={printTemporaryBillLoading}
-                    onClick={() => void onPrintTemporaryBill()}
-                  >
-                    {printTemporaryBillLoading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                        <span>Đang in phiếu…</span>
-                      </>
-                    ) : (
-                      "In phiếu"
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-danger inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-                    disabled={actionBusy}
-                    onClick={onCancelRoom}
-                  >
-                    {cancelLoading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                        Đang trả phòng…
-                      </>
-                    ) : (
-                      "Trả phòng"
-                    )}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary mt-2 inline-flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={actionBusy}
-                  onClick={onCheckout}
-                >
-                  {checkoutLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                      Đang thanh toán…
-                    </>
-                  ) : (
-                    "Thanh toán"
-                  )}
-                </button>
-              </>
-            ) : (
-              <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className="btn-danger inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={actionBusy}
-                  onClick={onCancelRoom}
-                >
-                  {cancelLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                      Đang trả phòng…
-                    </>
-                  ) : (
-                    "Trả phòng"
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary inline-flex min-w-0 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={actionBusy}
-                  onClick={onCheckout}
-                >
-                  {checkoutLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                      Đang thanh toán…
-                    </>
-                  ) : (
-                    "Thanh toán"
-                  )}
-                </button>
-              </div>
+    <section className="grid h-[calc(100vh-64px)] grid-cols-10 gap-3 overflow-hidden bg-[var(--color-background-wash,#f4f7f9)] p-3">
+      <div className="col-span-3 min-h-0">
+      <Card elevation="low" padding={0} height="100%">
+        <VStack height="100%">
+          <VStack padding={3} gap={1}>
+            <HStack hAlign="between" vAlign="start">
+              <Heading level={2}>{selectedRoom ? selectedRoom.ten_phong : "--"}</Heading>
+              <Text size="2xs" color="secondary">
+                Bắt đầu: {formatDateTime(currentSession?.gio_bat_dau)}
+              </Text>
+            </HStack>
+            {selectedRoom && (
+              <Badge
+                variant={selectedRoom.trang_thai === "TRONG" ? "warning" : "success"}
+                label={ROOM_STATUS_LABEL[selectedRoom.trang_thai]}
+              />
             )}
-            {currentSession && (
-              <button
-                type="button"
-                className="btn-ghost mt-2 w-full border border-slate-200 text-sm disabled:cursor-not-allowed disabled:opacity-70"
-                disabled={actionBusy}
-                onClick={() => setTransferModalOpen(true)}
-              >
-                Chuyển phòng
-              </button>
-            )}
-          </div>
-        )}
-      </aside>
+          </VStack>
+          <Divider />
 
-      <section className="col-span-5 flex min-h-0 flex-col gap-3">
-        <div className="app-card p-3">
-          <label className="relative block">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              className="app-input w-full pl-9"
-              placeholder="Tìm kiếm món..."
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-            />
-          </label>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {groupTabs.map((tab) => (
-              <button
-                key={tab.id}
-                className={
-                  activeGroupId === tab.id
-                    ? "rounded-md bg-primary px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white"
-                    : "rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-50"
-                }
-                onClick={() => setActiveGroupId(tab.id)}
-              >
-                {tab.name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="app-card min-h-0 flex-1 overflow-auto p-3">
-          <div className="grid grid-cols-4 gap-3">
-            {filteredProducts.map((product) => (
-              <button
-                key={product.san_pham_id}
-                className="rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-primary/40 hover:bg-slate-50"
-                onClick={() => onOpenOrderModal(product, 1)}
-              >
-                <div className="line-clamp-2 min-h-[40px] font-semibold text-slate-800">{product.ten_san_pham}</div>
-                <div className="mt-3 text-xl font-bold text-slate-700">{product.don_gia.toLocaleString()}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <aside className="app-card col-span-2 overflow-hidden p-0">
-        <div className="border-b border-slate-200 p-3">
-          <h3 className="font-semibold text-slate-800">Phòng ({rooms.length})</h3>
-        </div>
-        <div className="grid grid-cols-1 gap-2 p-3">
-          {rooms.map((room) => (
-            <button
-              key={room.phong_id}
-              className={`rounded-md border p-2 text-left transition ${room.trang_thai === "TRONG"
-                ? "border-rose-200 bg-rose-50 text-rose-800"
-                : "border-emerald-200 bg-emerald-50 text-emerald-800"
-                } ${selectedRoomId === room.phong_id ? "ring-2 ring-primary" : ""}`}
-              onClick={() => onSelectRoom(room.phong_id)}
-              onDoubleClick={() => room.trang_thai === "TRONG" && onStartRoom(room.phong_id)}
-            >
-              <div className="font-semibold">{room.ten_phong}</div>
-              <div className="text-xs">{ROOM_STATUS_LABEL[room.trang_thai]}</div>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {transferModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="relative w-[420px] max-w-[95vw] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              disabled={transferSubmitting}
-              onClick={() => setTransferModalOpen(false)}
-              aria-label="Đóng"
-            >
-              <X size={18} />
-            </button>
-            <h3 className="mb-2 text-lg font-semibold text-slate-800">Chuyển phòng</h3>
-            <p className="mb-3 text-sm text-slate-600">
-              Chọn phòng trống để chuyển toàn bộ phiên và món đang gọi sang phòng đích.
-            </p>
-            {emptyRoomsForTransfer.length === 0 ? (
-              <div className="rounded-md border border-dashed border-amber-200 bg-amber-50 px-3 py-4 text-sm text-amber-800">
-                Hiện không còn phòng trống. Vui lòng thử lại sau.
-              </div>
-            ) : (
-              <div className="max-h-[280px] space-y-2 overflow-auto">
-                {emptyRoomsForTransfer.map((room) => (
-                  <button
-                    key={room.phong_id}
-                    type="button"
-                    disabled={transferSubmitting}
-                    className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm transition hover:border-primary/40 hover:bg-white disabled:opacity-50"
-                    onClick={() => {
-                      void (async () => {
-                        setTransferSubmitting(true);
-                        try {
-                          await onTransferRoom(room.phong_id);
-                          setTransferModalOpen(false);
-                        } catch (err) {
-                          window.alert(String(err));
-                        } finally {
-                          setTransferSubmitting(false);
-                        }
-                      })();
-                    }}
-                  >
-                    <span className="font-semibold text-slate-800">{room.ten_phong}</span>
-                    <span className="text-xs text-slate-500">
-                      {Math.ceil(room.tien_gio).toLocaleString()} đ/giờ
-                    </span>
-                  </button>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <ScrollableArea label="Món đã gọi" height="100%" padding={3}>
+              <VStack gap={2}>
+                {currentSession && currentSession.items.length === 0 ? (
+                  <Text color="secondary">Chưa gọi món. Bấm món bên phải để thêm một.</Text>
+                ) : null}
+                {currentSession?.items.map((item) => (
+                  <HStack key={item.lich_su_phong_san_pham_id} gap={1} vAlign="center">
+                    <StackItem size="fill">
+                      <Text weight="medium" maxLines={1}>
+                        {item.ten_san_pham}
+                      </Text>
+                    </StackItem>
+                    <Button
+                      label="−"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onAdjustItemQty(item, -1)}
+                    />
+                    <Button
+                      label={String(item.so_luong)}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onEditItem(item)}
+                    />
+                    <Button
+                      label="+"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onAdjustItemQty(item, 1)}
+                    />
+                    <Text weight="semibold" hasTabularNumbers>
+                      {Math.round(item.thanh_tien).toLocaleString("vi-VN")}
+                    </Text>
+                  </HStack>
                 ))}
-              </div>
-            )}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={transferSubmitting}
-                onClick={() => setTransferModalOpen(false)}
-              >
-                Đóng
-              </button>
-            </div>
+              </VStack>
+            </ScrollableArea>
           </div>
+
+          {selectedRoom?.trang_thai === "TRONG" && (
+            <>
+              <Divider />
+              <VStack padding={3}>
+                <Button
+                  label="Mở phòng"
+                  variant="primary"
+                  size="lg"
+                  width="100%"
+                  isLoading={startingRoom}
+                  onClick={() => {
+                    setStartingRoom(true);
+                    void Promise.resolve(onStartRoom(selectedRoom.phong_id)).finally(() => setStartingRoom(false));
+                  }}
+                />
+              </VStack>
+            </>
+          )}
+
+          {selectedRoom?.trang_thai === "DANG_HOAT_DONG" && (
+            <>
+              <Divider />
+              <VStack padding={3} gap={2}>
+                <VStack gap={0.5}>
+                  <HStack hAlign="between">
+                    <Text color="secondary" size="sm">
+                      Tổng giờ
+                    </Text>
+                    <Text weight="semibold" size="sm">
+                      {totalDurationLabel}
+                    </Text>
+                  </HStack>
+                  <HStack hAlign="between">
+                    <Text color="secondary" size="sm">
+                      Tiền món
+                    </Text>
+                    <Text weight="semibold" size="sm" hasTabularNumbers>
+                      {tongTienMonDisplay.toLocaleString()}
+                    </Text>
+                  </HStack>
+                  <HStack hAlign="between">
+                    <Text color="secondary" size="sm">
+                      Tiền giờ
+                    </Text>
+                    <Text weight="semibold" size="sm" hasTabularNumbers>
+                      {tongTienGioDisplay.toLocaleString()}
+                    </Text>
+                  </HStack>
+                </VStack>
+                <HStack hAlign="between" vAlign="end">
+                  <Text weight="bold">Tổng cộng</Text>
+                  <Text type="display-3" weight="bold" color="accent" hasTabularNumbers>
+                    {tongCongDisplay.toLocaleString()}
+                  </Text>
+                </HStack>
+
+                {currentSession ? (
+                  <VStack gap={1}>
+                    <Button
+                      label="Thanh toán"
+                      variant="secondary"
+                      className="btn-pay"
+                      size="lg"
+                      width="100%"
+                      isLoading={checkoutLoading}
+                      isDisabled={actionBusy}
+                      onClick={onCheckout}
+                    />
+                    <HStack gap={1}>
+                      <Button
+                        label="In phiếu"
+                        variant="secondary"
+                        width="100%"
+                        isLoading={printTemporaryBillLoading}
+                        isDisabled={actionBusy}
+                        onClick={() => void onPrintTemporaryBill()}
+                      />
+                      <Button
+                        label="Trả phòng"
+                        variant="destructive"
+                        width="100%"
+                        isLoading={cancelLoading}
+                        isDisabled={actionBusy}
+                        onClick={onCancelRoom}
+                      />
+                    </HStack>
+                    <Button
+                      label="Chuyển phòng"
+                      variant="ghost"
+                      width="100%"
+                      isDisabled={actionBusy}
+                      onClick={() => setTransferModalOpen(true)}
+                    />
+                  </VStack>
+                ) : (
+                  <Text color="secondary">Đang tải phiên phòng...</Text>
+                )}
+              </VStack>
+            </>
+          )}
+        </VStack>
+      </Card>
+      </div>
+
+      <div className="col-span-4 flex min-h-0 flex-col gap-3">
+        <Card elevation="low" padding={3}>
+          <VStack gap={2}>
+            <TextInput
+              label="Tìm kiếm món"
+              isLabelHidden
+              type="search"
+              value={keyword}
+              onChange={setKeyword}
+              placeholder="Tìm kiếm món..."
+              startIcon="search"
+              hasClear
+              width="100%"
+            />
+            <TabList value={activeGroupId} onChange={setActiveGroupId} size="sm" overflow="scroll">
+              {groupTabs.map((tab) => (
+                <Tab key={tab.id} value={tab.id} label={tab.name} />
+              ))}
+            </TabList>
+          </VStack>
+        </Card>
+
+        <div className="min-h-0 flex-1">
+          <Card elevation="low" padding={0} height="100%">
+            <ScrollableArea label="Danh sách sản phẩm" height="100%" padding={3}>
+              {filteredProducts.length === 0 ? (
+                <EmptyState title="Không có món" description="Thử đổi nhóm hoặc từ khóa tìm kiếm." isCompact />
+              ) : (
+                <div className="pos-no-select grid grid-cols-3 gap-2">
+                  {filteredProducts.map((product) => (
+                    <ClickableCard
+                      key={product.san_pham_id}
+                      label={product.ten_san_pham}
+                      elevation="low"
+                      padding={3}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => onAddProduct(product)}
+                    >
+                      <VStack gap={2}>
+                        <Text weight="semibold" maxLines={2}>
+                          {product.ten_san_pham}
+                        </Text>
+                        <Text weight="bold" hasTabularNumbers>
+                          {product.don_gia.toLocaleString()}
+                        </Text>
+                      </VStack>
+                    </ClickableCard>
+                  ))}
+                </div>
+              )}
+            </ScrollableArea>
+          </Card>
         </div>
-      )}
+      </div>
+
+      <div className="col-span-3 min-h-0">
+      <Card elevation="low" padding={0} height="100%">
+        <VStack height="100%">
+          <VStack padding={3} gap={0}>
+            <Heading level={3}>Phòng ({rooms.length})</Heading>
+          </VStack>
+          <Divider />
+          <ScrollableArea label="Danh sách phòng" height="100%" padding={3}>
+            <VStack gap={2}>
+              {rooms.map((room) => (
+                <ClickableCard
+                  key={room.phong_id}
+                  label={room.ten_phong}
+                  elevation={selectedRoomId === room.phong_id ? "med" : "low"}
+                  variant={room.trang_thai === "TRONG" ? "default" : "green"}
+                  padding={3}
+                  onClick={() => onSelectRoom(room.phong_id)}
+                  onDoubleClick={() => {
+                    if (room.trang_thai === "TRONG") void onStartRoom(room.phong_id);
+                  }}
+                >
+                  <RoomTile room={room} now={now} />
+                </ClickableCard>
+              ))}
+            </VStack>
+          </ScrollableArea>
+        </VStack>
+      </Card>
+      </div>
+
+      <Dialog
+        isOpen={transferModalOpen}
+        onOpenChange={(next) => {
+          if (!next && !transferSubmitting) setTransferModalOpen(false);
+        }}
+        width={420}
+        purpose="form"
+        padding={0}
+      >
+        <VStack>
+          <DialogHeader
+            title="Chuyển phòng"
+            subtitle="Chọn phòng trống để chuyển toàn bộ phiên và món đang gọi."
+            onOpenChange={(next) => {
+              if (!next && !transferSubmitting) setTransferModalOpen(false);
+            }}
+          />
+          <VStack padding={4} gap={3}>
+            {emptyRoomsForTransfer.length === 0 ? (
+              <EmptyState
+                title="Không còn phòng trống"
+                description="Vui lòng thử lại sau."
+                isCompact
+              />
+            ) : (
+              <ScrollableArea label="Phòng trống" height={280}>
+                <VStack gap={1}>
+                  {emptyRoomsForTransfer.map((room) => (
+                    <Button
+                      key={room.phong_id}
+                      label={`${room.ten_phong} · ${Math.ceil(room.tien_gio).toLocaleString()} đ/giờ`}
+                      variant="secondary"
+                      width="100%"
+                      isDisabled={transferSubmitting}
+                      isLoading={transferSubmitting}
+                      onClick={() => {
+                        void (async () => {
+                          setTransferSubmitting(true);
+                          try {
+                            await onTransferRoom(room.phong_id);
+                            setTransferModalOpen(false);
+                          } catch (err) {
+                            window.alert(String(err));
+                          } finally {
+                            setTransferSubmitting(false);
+                          }
+                        })();
+                      }}
+                    />
+                  ))}
+                </VStack>
+              </ScrollableArea>
+            )}
+            <HStack hAlign="end">
+              <Button
+                label="Đóng"
+                variant="ghost"
+                isDisabled={transferSubmitting}
+                onClick={() => setTransferModalOpen(false)}
+              />
+            </HStack>
+          </VStack>
+        </VStack>
+      </Dialog>
     </section>
   );
 }

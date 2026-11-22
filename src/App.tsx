@@ -1,19 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { X } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Grid } from "@astryxdesign/core/Grid";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useToast } from "@astryxdesign/core/Toast";
+import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { AppHeader } from "@/components/AppHeader";
 import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
 import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
+import { Toaster } from "@/components/ui/sonner";
 import { CategoriesAdminPage } from "./features/categories/CategoriesAdminPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
 import { PosPage } from "@/features/pos/PosPage";
 import { ProductsAdminPage } from "@/features/products/ProductsAdminPage";
 import { RoomsAdminPage } from "@/features/rooms/RoomsAdminPage";
 import { PrinterSettingsPage } from "@/features/settings/PrinterSettingsPage";
-import { Toaster } from "@/components/ui/sonner";
-import { Select } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useKaraoke } from "@/hooks/useKaraoke";
 import type { OrderItem, Product } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
@@ -94,8 +101,10 @@ function alertInvokeError(error: unknown, prefix?: string) {
   window.alert(prefix ? `${prefix} ${msg}` : msg);
 }
 
-function AppShell() {
-  const [historyDate, setHistoryDate] = useState(() => todayLocalYmd());
+function SongPhungShell() {
+  const showToast = useToast();
+  const [historyStart, setHistoryStart] = useState(() => todayLocalYmd());
+  const [historyEnd, setHistoryEnd] = useState(() => todayLocalYmd());
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
@@ -112,6 +121,9 @@ function AppShell() {
   const [printerMessage, setPrinterMessage] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [qtyInput, setQtyInput] = useState("1");
+  const qtyFieldRef = useRef<HTMLInputElement>(null);
+  const addQueueRef = useRef(Promise.resolve());
+  const pendingQtyRef = useRef(new Map<string, number>());
   const [printerTarget, setPrinterTarget] = useState("");
   const [printTemporaryBillLoading, setPrintTemporaryBillLoading] = useState(false);
   const [checkoutSubmitting, setCheckoutSubmitting] = useState(false);
@@ -264,9 +276,18 @@ function AppShell() {
   }, [printSettingsReady]);
 
   useEffect(() => {
-    if (!historyDate) return;
-    void karaoke.loadHistory(historyDate);
-  }, [historyDate, karaoke.loadHistory]);
+    if (!historyStart || !historyEnd) return;
+    void karaoke.loadHistory(historyStart, historyEnd);
+  }, [historyStart, historyEnd, karaoke.loadHistory]);
+
+  useEffect(() => {
+    if (!orderModalOpen) return;
+    const timer = window.setTimeout(() => {
+      qtyFieldRef.current?.focus();
+      qtyFieldRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [orderModalOpen, selectedProduct]);
 
   function updatePrinterTarget(value: string) {
     setPrinterTarget(value);
@@ -401,6 +422,73 @@ function AppShell() {
     }
   }
 
+  async function refreshRoomBill() {
+    await karaoke.loadCurrentSession(karaoke.selectedRoomId);
+    await karaoke.loadRooms();
+  }
+
+  async function restoreRemovedItem(historyId: number, roomId: number, item: OrderItem) {
+    try {
+      await invoke("add_or_update_order_item", {
+        historyId,
+        productId: item.san_pham_id,
+        qty: item.so_luong,
+        price: item.don_gia,
+      });
+      if (karaoke.selectedRoomId === roomId) {
+        await karaoke.loadCurrentSession(roomId);
+      }
+      await karaoke.loadRooms();
+    } catch (error) {
+      showToast({ body: `Hoàn tác thất bại: ${String(error)}`, type: "error" });
+    }
+  }
+
+  function offerUndoRemove(historyId: number, roomId: number, item: OrderItem) {
+    showToast({
+      body: `Đã xóa ${item.ten_san_pham}`,
+      autoHideDuration: 6000,
+      endContent: (
+        <Button
+          label="Hoàn tác"
+          size="sm"
+          variant="secondary"
+          onClick={() => void restoreRemovedItem(historyId, roomId, item)}
+        />
+      ),
+    });
+  }
+
+  function handleAddProduct(product: Product) {
+    if (!karaoke.currentSession || karaoke.selectedRoom?.trang_thai !== "DANG_HOAT_DONG") {
+      showToast({ body: "Mở phòng trước khi gọi món.", type: "error" });
+      return;
+    }
+    const historyId = karaoke.currentSession.lich_su_phong_id;
+    const existing = karaoke.currentSession.items.find((item) => item.san_pham_id === product.san_pham_id);
+    const base = pendingQtyRef.current.get(product.san_pham_id) ?? existing?.so_luong ?? 0;
+    const nextQty = base + 1;
+    pendingQtyRef.current.set(product.san_pham_id, nextQty);
+
+    addQueueRef.current = addQueueRef.current.then(async () => {
+      try {
+        await invoke("add_or_update_order_item", {
+          historyId,
+          productId: product.san_pham_id,
+          qty: nextQty,
+          price: product.don_gia,
+        });
+        await refreshRoomBill();
+        if (pendingQtyRef.current.get(product.san_pham_id) === nextQty) {
+          pendingQtyRef.current.delete(product.san_pham_id);
+        }
+      } catch (error) {
+        pendingQtyRef.current.delete(product.san_pham_id);
+        showToast({ body: `Thêm món thất bại: ${String(error)}`, type: "error" });
+      }
+    });
+  }
+
   function openOrderModal(product: Product, initialQty: number) {
     if (!karaoke.currentSession) return;
     setSelectedProduct(product);
@@ -427,7 +515,13 @@ function AppShell() {
       }
       setOrderModalOpen(false);
       setSelectedProduct(null);
-      await karaoke.loadCurrentSession(karaoke.selectedRoomId);
+      await refreshRoomBill();
+      if (qty === 0) {
+        const removed = karaoke.currentSession.items.find((item) => item.san_pham_id === selectedProduct.san_pham_id);
+        if (removed && karaoke.selectedRoomId != null) {
+          offerUndoRemove(historyId, karaoke.selectedRoomId, removed);
+        }
+      }
     } catch (error) {
       window.alert(`Lưu món thất bại: ${String(error)}`);
     } finally {
@@ -442,35 +536,33 @@ function AppShell() {
     openOrderModal(product, item.so_luong);
   }
 
-  async function handleRemoveItem(item: OrderItem) {
-    if (!karaoke.currentSession) return;
-    await invoke("remove_order_item", {
-      historyId: karaoke.currentSession.lich_su_phong_id,
-      productId: item.san_pham_id,
-    });
-    await karaoke.loadCurrentSession(karaoke.selectedRoomId);
-  }
-
   async function handleAdjustItemQty(item: OrderItem, delta: number) {
-    if (!karaoke.currentSession) return;
+    if (!karaoke.currentSession || karaoke.selectedRoomId == null) return;
     const nextQty = item.so_luong + delta;
     const historyId = karaoke.currentSession.lich_su_phong_id;
+    const roomId = karaoke.selectedRoomId;
 
-    if (nextQty <= 0) {
-      await invoke("remove_order_item", {
-        historyId,
-        productId: item.san_pham_id,
-      });
-    } else {
+    try {
+      if (nextQty <= 0) {
+        await invoke("remove_order_item", {
+          historyId,
+          productId: item.san_pham_id,
+        });
+        await refreshRoomBill();
+        offerUndoRemove(historyId, roomId, item);
+        return;
+      }
+
       await invoke("add_or_update_order_item", {
         historyId,
         productId: item.san_pham_id,
         qty: nextQty,
         price: item.don_gia,
       });
+      await refreshRoomBill();
+    } catch (error) {
+      showToast({ body: `Cập nhật món thất bại: ${String(error)}`, type: "error" });
     }
-
-    await karaoke.loadCurrentSession(karaoke.selectedRoomId);
   }
 
   function requestCancelRoom() {
@@ -611,7 +703,7 @@ function AppShell() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="min-h-screen bg-[#f4f7f9] text-slate-800">
       <AppHeader />
       <Routes>
         <Route
@@ -627,10 +719,10 @@ function AppShell() {
                 currentSession={karaoke.currentSession}
                 onSelectRoom={karaoke.setSelectedRoomId}
                 onStartRoom={handleStartRoom}
-                onOpenOrderModal={openOrderModal}
+                onAddProduct={handleAddProduct}
                 onAdjustItemQty={handleAdjustItemQty}
                 onEditItem={handleEditItem}
-                onRemoveItem={handleRemoveItem}
+                onRefreshRooms={karaoke.loadRooms}
                 onCancelRoom={requestCancelRoom}
                 onCheckout={requestCheckout}
                 onTransferRoom={handleTransferRoom}
@@ -639,36 +731,53 @@ function AppShell() {
                 checkoutLoading={checkoutSubmitting}
                 cancelLoading={cancelSubmitting}
               />
-              {orderModalOpen && selectedProduct && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="relative w-[340px] rounded-lg bg-white p-4 shadow-lg">
-                    <button
-                      type="button"
-                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-                      disabled={orderSubmitting}
-                      onClick={() => {
+              <Dialog
+                isOpen={orderModalOpen && selectedProduct != null}
+                onOpenChange={(next) => {
+                  if (!next && !orderSubmitting) {
+                    setOrderModalOpen(false);
+                    setSelectedProduct(null);
+                  }
+                }}
+                width={360}
+                purpose="form"
+                padding={0}
+              >
+                <VStack>
+                  <DialogHeader
+                    title={selectedProduct?.ten_san_pham ?? "Nhập số lượng"}
+                    subtitle="Nhập số lượng"
+                    onOpenChange={(next) => {
+                      if (!next && !orderSubmitting) {
                         setOrderModalOpen(false);
                         setSelectedProduct(null);
-                      }}
-                      aria-label="Đóng"
-                    >
-                      <X size={18} />
-                    </button>
-                    <div className="mb-2 text-sm text-slate-500">Nhập số lượng</div>
-                    <div className="mb-2 text-lg font-semibold">{selectedProduct.ten_san_pham}</div>
-                    <input
-                      className="mb-3 w-full rounded border px-3 py-2 text-right text-2xl"
+                      }
+                    }}
+                  />
+                  <VStack padding={4} gap={3}>
+                    <TextInput
+                      label="Số lượng"
+                      isLabelHidden
                       value={qtyInput}
-                      onChange={(e) => setQtyInput(e.target.value.replace(/[^0-9]/g, ""))}
+                      onChange={(v) => setQtyInput(v.replace(/[^0-9]/g, ""))}
+                      inputMode="numeric"
+                      hasAutoFocus
+                      ref={qtyFieldRef}
+                      onEnter={() => void saveOrderQty()}
+                      isDisabled={orderSubmitting}
+                      width="100%"
+                      size="lg"
+                      controlStyle={{ textAlign: "right" }}
                     />
-                    <div className="grid grid-cols-3 gap-2">
+                    <Grid columns={3} gap={2}>
                       {["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", "C", "OK"].map((key) => (
-                        <button
+                        <Button
                           key={key}
-                          disabled={orderSubmitting}
-                          className={`rounded px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                            key === "OK" ? "bg-emerald-600 text-white" : "bg-slate-100"
-                          }`}
+                          label={key}
+                          width="100%"
+                          size="lg"
+                          variant={key === "OK" ? "primary" : "secondary"}
+                          isDisabled={orderSubmitting}
                           onClick={() => {
                             if (key === "C") {
                               setQtyInput("0");
@@ -680,61 +789,61 @@ function AppShell() {
                             }
                             setQtyInput((prev) => `${prev === "0" ? "" : prev}${key}`);
                           }}
-                        >
-                          {key}
-                        </button>
+                        />
                       ))}
-                    </div>
-                    <div className="mt-3 flex justify-end gap-2">
-                      <button
-                        className="btn-ghost"
-                        disabled={orderSubmitting}
+                    </Grid>
+                    <HStack hAlign="end">
+                      <Button
+                        label="Hủy"
+                        variant="ghost"
+                        isDisabled={orderSubmitting}
                         onClick={() => {
                           setOrderModalOpen(false);
                           setSelectedProduct(null);
                         }}
-                      >
-                        Hủy
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {cancelModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-                  <div className="relative w-[420px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-                    <button
-                      type="button"
-                      className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-                      disabled={cancelSubmitting}
-                      onClick={() => setCancelModalOpen(false)}
-                      aria-label="Đóng"
-                    >
-                      <X size={18} />
-                    </button>
-                    <h3 className="mb-2 text-lg font-semibold">Xác nhận trả phòng</h3>
-                    <p className="text-sm text-slate-600">
+                      />
+                    </HStack>
+                  </VStack>
+                </VStack>
+              </Dialog>
+              <Dialog
+                isOpen={cancelModalOpen}
+                onOpenChange={(next) => {
+                  if (!next && !cancelSubmitting) setCancelModalOpen(false);
+                }}
+                width={440}
+                purpose="required"
+                padding={0}
+              >
+                <VStack>
+                  <DialogHeader
+                    title="Xác nhận trả phòng"
+                    onOpenChange={(next) => {
+                      if (!next && !cancelSubmitting) setCancelModalOpen(false);
+                    }}
+                  />
+                  <VStack padding={4} gap={4}>
+                    <Text>
                       Bạn có chắc chắn muốn hủy phòng này? Dữ liệu gọi món sẽ bị xóa.
-                    </p>
-                    <div className="mt-4 flex justify-end gap-2">
-                      <button
-                        className="btn-ghost"
-                        disabled={cancelSubmitting}
+                    </Text>
+                    <HStack gap={2} hAlign="end">
+                      <Button
+                        label="Không"
+                        variant="ghost"
+                        isDisabled={cancelSubmitting}
                         onClick={() => setCancelModalOpen(false)}
-                      >
-                        Không
-                      </button>
-                      <button
-                        className="inline-flex items-center justify-center gap-2 rounded bg-rose-600 px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-70"
-                        disabled={cancelSubmitting}
+                      />
+                      <Button
+                        label={cancelSubmitting ? "Đang trả phòng..." : "Đồng ý trả phòng"}
+                        variant="destructive"
+                        isLoading={cancelSubmitting}
+                        isDisabled={cancelSubmitting}
                         onClick={() => void handleCancelRoom()}
-                      >
-                        {cancelSubmitting ? "Đang trả phòng..." : "Đồng ý trả phòng"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+                      />
+                    </HStack>
+                  </VStack>
+                </VStack>
+              </Dialog>
               {checkoutModalOpen && karaoke.currentSession && (
                 <ConfirmBillActionModal
                   open={checkoutModalOpen}
@@ -746,109 +855,123 @@ function AppShell() {
                   }}
                   onConfirm={() => void confirmCheckout()}
                   leftContent={
-                    <>
-                      <div className="space-y-1 text-sm">
-                        <div>
-                          <span className="text-slate-500">Phòng:</span> {karaoke.currentSession.ten_phong}
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Tiền món:</span>{" "}
-                          {Math.ceil(karaoke.currentSession.tong_tien_san_pham).toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="mt-3">
-                        <label className="mb-1 block text-sm text-slate-600">Tiền giờ</label>
-                        <input
-                          className="w-full rounded border px-3 py-2 text-right text-xl disabled:bg-slate-50"
-                          disabled={checkoutSubmitting}
-                          value={checkoutHourAmount}
-                          onChange={(e) => {
-                            const digits = e.target.value.replace(/\D/g, "");
-                            const nextHour = digits === "" ? "" : formatAmountDigits(digits);
-                            setCheckoutHourAmount(nextHour);
-                            const hour = digits === "" ? 0 : Number(digits);
-                            const tienMon = Math.max(0, Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0));
-                            setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
-                          }}
-                          inputMode="numeric"
-                        />
-                      </div>
-                      <div className="mt-3">
-                        <label className="mb-1 block text-sm text-slate-600">Thành tiền</label>
-                        <input
-                          className="w-full rounded border px-3 py-2 text-right text-xl disabled:bg-slate-50"
-                          disabled={checkoutSubmitting}
-                          value={checkoutAmount}
-                          onChange={(e) => {
-                            const digits = e.target.value.replace(/\D/g, "");
-                            setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
-                          }}
-                          inputMode="numeric"
-                        />
-                      </div>
-                      <label className="mt-3 inline-flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={checkoutPrintReceipt}
-                          disabled={checkoutSubmitting}
-                          onCheckedChange={(checked) => {
-                            const next = checked === true;
-                            setCheckoutPrintReceipt(next);
-                            if (next) {
-                              void checkPrinterConnection();
-                            } else {
-                              setPrinterConnected(null);
-                              setPrinterMessage("");
-                            }
-                          }}
-                        />
-                        In hóa đơn
-                      </label>
+                    <VStack gap={3} width="100%">
+                      <VStack gap={0.5}>
+                        <Text color="secondary">
+                          Phòng:{" "}
+                          <Text weight="semibold">{karaoke.currentSession.ten_phong}</Text>
+                        </Text>
+                        <Text color="secondary">
+                          Tiền món:{" "}
+                          <Text weight="semibold" hasTabularNumbers>
+                            {Math.max(
+                              0,
+                              Math.ceil(karaoke.currentSession.tong_tien_san_pham),
+                            ).toLocaleString()}
+                          </Text>
+                        </Text>
+                      </VStack>
+                      <TextInput
+                        label="Tiền giờ"
+                        value={checkoutHourAmount}
+                        onChange={(v) => {
+                          const digits = v.replace(/\D/g, "");
+                          const nextHour = digits === "" ? "" : formatAmountDigits(digits);
+                          setCheckoutHourAmount(nextHour);
+                          const hour = digits === "" ? 0 : Number(digits);
+                          const tienMon = Math.max(
+                            0,
+                            Math.ceil(karaoke.currentSession?.tong_tien_san_pham ?? 0),
+                          );
+                          setCheckoutAmount(formatAmountDigits(String(tienMon + hour)));
+                        }}
+                        inputMode="numeric"
+                        isDisabled={checkoutSubmitting}
+                        width="100%"
+                        size="lg"
+                        controlStyle={{ textAlign: "right" }}
+                      />
+                      <TextInput
+                        label="Thành tiền"
+                        value={checkoutAmount}
+                        onChange={(v) => {
+                          const digits = v.replace(/\D/g, "");
+                          setCheckoutAmount(digits === "" ? "" : formatAmountDigits(digits));
+                        }}
+                        inputMode="numeric"
+                        isDisabled={checkoutSubmitting}
+                        width="100%"
+                        size="lg"
+                        controlStyle={{ textAlign: "right" }}
+                      />
+                      <CheckboxInput
+                        label="In hóa đơn"
+                        value={checkoutPrintReceipt}
+                        isDisabled={checkoutSubmitting}
+                        onChange={(next) => {
+                          setCheckoutPrintReceipt(next);
+                          if (next) {
+                            void checkPrinterConnection();
+                          } else {
+                            setPrinterConnected(null);
+                            setPrinterMessage("");
+                          }
+                        }}
+                      />
                       {checkoutPrintReceipt && printBillQr && (
-                        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
-                          <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
-                          <Select
-                            value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
-                            onChange={(e) => {
-                              const id = Number(e.target.value);
-                              persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
-                            }}
-                          >
-                            <option value="">-- Chọn QR --</option>
-                            {qrThanhToanList.map((item) => (
-                              <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                                {item.qr_thanh_toan_ten}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
+                        <Selector
+                          label="QR thanh toán"
+                          hasClear
+                          placeholder="-- Chọn QR --"
+                          options={qrThanhToanList.map((item) => ({
+                            value: String(item.qr_thanh_toan_id),
+                            label: item.qr_thanh_toan_ten,
+                          }))}
+                          value={
+                            selectedQrThanhToanId != null
+                              ? String(selectedQrThanhToanId)
+                              : null
+                          }
+                          onChange={(v) => {
+                            if (v == null) {
+                              persistSelectedQrId(null);
+                              return;
+                            }
+                            const id = Number(v);
+                            persistSelectedQrId(Number.isFinite(id) && id > 0 ? id : null);
+                          }}
+                          isDisabled={checkoutSubmitting}
+                          width="100%"
+                        />
                       )}
                       {checkoutPrintReceipt && !printBillQr && (
-                        <p className="mt-2 text-xs text-slate-500">
+                        <Text type="supporting" color="secondary">
                           Đã tắt mã QR trong Cài đặt. Hóa đơn sẽ in không kèm QR.
-                        </p>
+                        </Text>
                       )}
                       {!checkoutPrintReceipt && (
-                        <p className="mt-2 text-xs text-slate-500">
+                        <Text type="supporting" color="secondary">
                           Thanh toán không bắt buộc máy in. Bỏ chọn in hóa đơn để hoàn tất ngay.
-                        </p>
+                        </Text>
                       )}
                       {(checkoutPrintReceipt || printerMessage) && (
-                        <div
-                          className={`mt-2 rounded px-2 py-1 text-sm ${
+                        <Banner
+                          status={
                             checkoutPrintReceipt
                               ? printerConnected
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-rose-50 text-rose-700"
-                              : "bg-amber-50 text-amber-800"
-                          }`}
-                        >
-                          {printerChecking
-                            ? "Đang kiểm tra kết nối máy in..."
-                            : printerMessage || "Chưa kiểm tra máy in"}
-                        </div>
+                                ? "success"
+                                : "error"
+                              : "warning"
+                          }
+                          title={
+                            printerChecking
+                              ? "Đang kiểm tra kết nối máy in..."
+                              : printerMessage || "Chưa kiểm tra máy in"
+                          }
+                          collapsible={false}
+                        />
                       )}
-                    </>
+                    </VStack>
                   }
                   rightContent={
                     <BillTemplatePreview
@@ -881,45 +1004,50 @@ function AppShell() {
                   onClose={() => setTemporaryBillModalOpen(false)}
                   onConfirm={() => void handlePrintTemporaryBill()}
                   leftContent={
-                    <>
-                      <div className="space-y-1 text-sm">
-                        <div>
-                          <span className="text-slate-500">Phòng:</span> {karaoke.currentSession.ten_phong}
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Giờ vào:</span> {karaoke.currentSession.gio_bat_dau}
-                        </div>
-                        <div>
-                          <span className="text-slate-500">Giờ hiện tại:</span> {temporaryBillNow}
-                        </div>
-                      </div>
+                    <VStack gap={3} width="100%">
+                      <VStack gap={0.5}>
+                        <Text color="secondary">
+                          Phòng:{" "}
+                          <Text weight="semibold">{karaoke.currentSession.ten_phong}</Text>
+                        </Text>
+                        <Text color="secondary">
+                          Giờ vào: {karaoke.currentSession.gio_bat_dau}
+                        </Text>
+                        <Text color="secondary">Giờ hiện tại: {temporaryBillNow}</Text>
+                      </VStack>
                       {printBillQr ? (
-                        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">QR thanh toán</p>
-                          <label className="mb-1 block text-xs text-slate-500">Chọn QR</label>
-                          <Select
-                            value={temporaryBillSelectedQrId != null ? String(temporaryBillSelectedQrId) : ""}
-                            onChange={(e) => {
-                              const id = Number(e.target.value);
-                              const nextId = Number.isFinite(id) && id > 0 ? id : null;
-                              setTemporaryBillSelectedQrId(nextId);
-                              persistSelectedQrId(nextId);
-                            }}
-                          >
-                            <option value="">-- Chọn QR --</option>
-                            {qrThanhToanList.map((item) => (
-                              <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                                {item.qr_thanh_toan_ten}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
+                        <Selector
+                          label="QR thanh toán"
+                          hasClear
+                          placeholder="-- Chọn QR --"
+                          options={qrThanhToanList.map((item) => ({
+                            value: String(item.qr_thanh_toan_id),
+                            label: item.qr_thanh_toan_ten,
+                          }))}
+                          value={
+                            temporaryBillSelectedQrId != null
+                              ? String(temporaryBillSelectedQrId)
+                              : null
+                          }
+                          onChange={(v) => {
+                            if (v == null) {
+                              setTemporaryBillSelectedQrId(null);
+                              persistSelectedQrId(null);
+                              return;
+                            }
+                            const id = Number(v);
+                            const nextId = Number.isFinite(id) && id > 0 ? id : null;
+                            setTemporaryBillSelectedQrId(nextId);
+                            persistSelectedQrId(nextId);
+                          }}
+                          width="100%"
+                        />
                       ) : (
-                        <p className="mt-3 text-xs text-slate-500">
+                        <Text type="supporting" color="secondary">
                           Đã tắt mã QR trong Cài đặt. Phiếu tạm tính sẽ in không kèm QR.
-                        </p>
+                        </Text>
                       )}
-                    </>
+                    </VStack>
                   }
                   rightContent={
                     <BillTemplatePreview
@@ -1035,9 +1163,11 @@ function AppShell() {
               histories={karaoke.histories}
               historyItems={karaoke.historyItems}
               products={karaoke.products}
-              historyDate={historyDate}
-              onDateChange={setHistoryDate}
-              onFilter={() => karaoke.loadHistory(historyDate)}
+              historyStart={historyStart}
+              historyEnd={historyEnd}
+              onStartChange={setHistoryStart}
+              onEndChange={setHistoryEnd}
+              onFilter={() => karaoke.loadHistory(historyStart, historyEnd)}
               onOpenDetail={(historyId) => karaoke.loadHistoryDetail(historyId)}
               onReprintBill={async (historyId, selectedQrId) => {
                 const printer = await invoke<{ connected: boolean; message: string }>(
@@ -1065,9 +1195,6 @@ function AppShell() {
               onDeleteByIds={async (ids) => {
                 return invoke<number>("delete_history_by_ids", { ids });
               }}
-              onDeleteByRange={async (startDate, endDate) => {
-                return invoke<number>("delete_history_by_range", { startDate, endDate });
-              }}
               onUpdateBill={async (historyId, tongTienGio, tongTienThanhToan, items) => {
                 return invoke<string>("update_paid_history_bill", {
                   payload: {
@@ -1081,7 +1208,7 @@ function AppShell() {
                   },
                 });
               }}
-              onReloadHistory={() => karaoke.loadHistory(historyDate)}
+              onReloadHistory={() => karaoke.loadHistory(historyStart, historyEnd)}
             />
           }
         />
@@ -1099,6 +1226,11 @@ function AppShell() {
               onQrFixedAmountDisplayChange={persistQrFixedAmountDisplay}
               selectedQrThanhToanId={selectedQrThanhToanId}
               onSelectedQrThanhToanIdChange={persistSelectedQrId}
+              onDataChanged={async () => {
+                await karaoke.loadMasterData();
+                await karaoke.loadCurrentSession(karaoke.selectedRoomId);
+                await karaoke.loadHistory(historyStart, historyEnd);
+              }}
             />
           }
         />
@@ -1111,7 +1243,7 @@ function AppShell() {
 export default function App() {
   return (
     <HashRouter>
-      <AppShell />
+      <SongPhungShell />
       <Toaster position="top-right" richColors closeButton />
     </HashRouter>
   );

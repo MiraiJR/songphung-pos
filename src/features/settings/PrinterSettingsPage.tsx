@@ -1,8 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
-import { Select } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
+import { Card } from "@astryxdesign/core/Card";
+import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { Selector } from "@astryxdesign/core/Selector";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { DateInput } from "@astryxdesign/core/DateInput";
+import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { VStack } from "@astryxdesign/core/VStack";
+import { HStack } from "@astryxdesign/core/HStack";
+import { StackItem } from "@astryxdesign/core/Stack";
+import { useToast } from "@astryxdesign/core/Toast";
 
 type Props = {
   printerTarget: string;
@@ -15,14 +27,50 @@ type Props = {
   onQrFixedAmountDisplayChange: (value: string) => void;
   selectedQrThanhToanId: number | null;
   onSelectedQrThanhToanIdChange: (value: number | null) => void;
+  onDataChanged?: () => Promise<void>;
 };
 
 type TestStatus = { type: "ok" | "error"; message: string } | null;
+type CleanupMode = "paid_range" | "paid_all" | "active" | "all";
+
+function todayLocalYmd(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const CLEANUP_OPTIONS: Array<{ value: CleanupMode; label: string; detail: string }> = [
+  {
+    value: "paid_range",
+    label: "Hóa đơn đã thanh toán theo khoảng ngày",
+    detail: "Xóa các hóa đơn đã thanh toán có ngày kết thúc nằm trong khoảng đã chọn.",
+  },
+  {
+    value: "paid_all",
+    label: "Toàn bộ hóa đơn đã thanh toán",
+    detail: "Xóa hết lịch sử hóa đơn đã thanh toán. Phiên đang hát được giữ lại.",
+  },
+  {
+    value: "active",
+    label: "Phiên đang hát",
+    detail: "Xóa phiên chưa thanh toán và đưa những phòng đó về trạng thái trống.",
+  },
+  {
+    value: "all",
+    label: "Toàn bộ dữ liệu phòng hát",
+    detail: "Xóa hóa đơn đã thanh toán và phiên đang hát, rồi đưa mọi phòng về trống. Danh sách phòng, sản phẩm và QR không bị xóa.",
+  },
+];
+
 type QrThanhToan = {
   qr_thanh_toan_id: number;
   qr_thanh_toan_ten: string;
   qr_code: string;
 };
+
+type ISODate = `${number}${number}${number}${number}-${number}${number}-${number}${number}`;
 
 export function PrinterSettingsPage({
   printerTarget,
@@ -35,8 +83,15 @@ export function PrinterSettingsPage({
   onQrFixedAmountDisplayChange,
   selectedQrThanhToanId,
   onSelectedQrThanhToanIdChange,
+  onDataChanged,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<"printer" | "qr">("printer");
+  const showToast = useToast();
+  const [settingsSection, setSettingsSection] = useState<"printer" | "qr" | "cleanup">("printer");
+  const [cleanupMode, setCleanupMode] = useState<CleanupMode>("paid_range");
+  const [cleanupStart, setCleanupStart] = useState(todayLocalYmd);
+  const [cleanupEnd, setCleanupEnd] = useState(todayLocalYmd);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [systemPrinters, setSystemPrinters] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState(printerTarget);
   const [testing, setTesting] = useState(false);
@@ -51,6 +106,7 @@ export function PrinterSettingsPage({
   const [editingQrId, setEditingQrId] = useState<number | null>(null);
   const [editingQrName, setEditingQrName] = useState("");
   const [editingQrCode, setEditingQrCode] = useState("");
+  const [deleteQrTarget, setDeleteQrTarget] = useState<QrThanhToan | null>(null);
   const loadingRef = useRef(false);
 
   const qrSettingsPayload = useMemo(() => {
@@ -95,11 +151,11 @@ export function PrinterSettingsPage({
         onSelectedQrThanhToanIdChange(list[0].qr_thanh_toan_id);
       }
     } catch (error) {
-      toast.error(`Không tải được danh sách QR: ${String(error)}`);
+      showToast({ body: `Không tải được danh sách QR: ${String(error)}`, type: "error" });
     } finally {
       loadingRef.current = false;
     }
-  }, [onSelectedQrThanhToanIdChange, selectedQrThanhToanId]);
+  }, [onSelectedQrThanhToanIdChange, selectedQrThanhToanId, showToast]);
 
   const reloadQrPreview = useCallback(async () => {
     try {
@@ -189,42 +245,87 @@ export function PrinterSettingsPage({
     }
   }
 
+  const printerSourceOptions = [
+    { value: "SYSTEM", label: "Máy in hệ thống" },
+    { value: "CUSTOM", label: "Nhập địa chỉ máy in mạng" },
+  ];
+
+  const systemPrinterOptions = [
+    { value: "", label: "Chọn máy in" },
+    ...systemPrinters.map((name) => ({ value: name, label: name })),
+  ];
+
+  const qrSelectOptions = [
+    { value: "", label: "-- Chọn QR --" },
+    ...qrList.map((item) => ({
+      value: String(item.qr_thanh_toan_id),
+      label: item.qr_thanh_toan_ten,
+    })),
+  ];
+
+  const cleanupChoice = CLEANUP_OPTIONS.find((item) => item.value === cleanupMode) ?? CLEANUP_OPTIONS[0];
+
+  const runCleanup = async () => {
+    setCleaning(true);
+    try {
+      const message = await invoke<string>("cleanup_room_data", {
+        mode: cleanupMode,
+        startDate: cleanupMode === "paid_range" ? cleanupStart : null,
+        endDate: cleanupMode === "paid_range" ? cleanupEnd : null,
+      });
+      showToast({ body: message });
+      setCleanupOpen(false);
+      await onDataChanged?.();
+    } catch (error) {
+      showToast({ body: String(error), type: "error" });
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   return (
-    <section className="p-4">
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold text-slate-800">Cài đặt in</h2>
-        <p className="mt-1 text-sm text-slate-500">
+    <VStack gap={4} padding={4}>
+      <VStack gap={0.5}>
+        <Heading level={2}>Cài đặt in</Heading>
+        <Text type="supporting">
           Ưu tiên chọn máy in hệ thống (USB/cục bộ). Chỉ nhập địa chỉ IP khi dùng máy in mạng.
-        </p>
-      </div>
+        </Text>
+      </VStack>
 
-      <div className="mb-4 flex gap-2">
-        <button
-          type="button"
-          className={activeTab === "printer" ? "btn-secondary" : "btn-ghost border border-slate-200"}
-          onClick={() => setActiveTab("printer")}
-        >
-          Máy In
-        </button>
-        <button
-          type="button"
-          className={activeTab === "qr" ? "btn-secondary" : "btn-ghost border border-slate-200"}
-          onClick={() => setActiveTab("qr")}
-        >
-          QR Code
-        </button>
-      </div>
-
-      {activeTab === "printer" && (
-        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
-          <div className="app-card w-full max-w-2xl shrink-0 p-4 lg:max-w-md xl:max-w-lg">
-            <div className="mb-3">
-              <label className="mb-1 block text-sm text-slate-600">Nguồn máy in</label>
-              <Select
+      <HStack gap={4} align="start">
+        <VStack gap={2} width={220}>
+          <Button
+            label="Máy in"
+            variant={settingsSection === "printer" ? "primary" : "secondary"}
+            size="lg"
+            width="100%"
+            onClick={() => setSettingsSection("printer")}
+          />
+          <Button
+            label="QR Code"
+            variant={settingsSection === "qr" ? "primary" : "secondary"}
+            size="lg"
+            width="100%"
+            onClick={() => setSettingsSection("qr")}
+          />
+          <Button
+            label="Dọn dẹp"
+            variant={settingsSection === "cleanup" ? "primary" : "secondary"}
+            size="lg"
+            width="100%"
+            onClick={() => setSettingsSection("cleanup")}
+          />
+        </VStack>
+        {settingsSection === "printer" ? (
+        <VStack gap={4} width={440}>
+          <Card elevation="low" padding={4}>
+            <VStack gap={3}>
+              <Text weight="semibold">Máy in</Text>
+              <Selector
+                label="Nguồn máy in"
                 value={currentSource}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  if (next === "CUSTOM") {
+                onChange={(v) => {
+                  if (v === "CUSTOM") {
                     setInputValue("");
                     return;
                   }
@@ -232,319 +333,404 @@ export function PrinterSettingsPage({
                     setInputValue(systemPrinters[0]);
                   }
                 }}
-              >
-                <option value="SYSTEM">Máy in hệ thống</option>
-                <option value="CUSTOM">Nhập địa chỉ máy in mạng</option>
-              </Select>
-            </div>
+                options={printerSourceOptions}
+              />
 
-            {currentSource === "SYSTEM" ? (
-              <div className="mb-3">
-                <label className="mb-1 block text-sm text-slate-600">Danh sách máy in hệ thống</label>
-                <Select value={inputValue} onChange={(e) => setInputValue(e.target.value)}>
-                  <option value="">Chọn máy in</option>
-                  {systemPrinters.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : (
-              <div className="mb-3">
-                <label className="mb-1 block text-sm text-slate-600">Địa chỉ máy in mạng (vd: 192.168.1.20:9100)</label>
-                <input
-                  className="app-input w-full"
+              {currentSource === "SYSTEM" ? (
+                <Selector
+                  label="Danh sách máy in hệ thống"
                   value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
+                  onChange={(v) => setInputValue(v)}
+                  options={systemPrinterOptions}
+                />
+              ) : (
+                <TextInput
+                  label="Địa chỉ máy in mạng (vd: 192.168.1.20:9100)"
+                  value={inputValue}
+                  onChange={(v) => setInputValue(v)}
                   placeholder="127.0.0.1:9100"
                 />
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
-              <button className="btn-secondary" onClick={() => void testAndSave()} disabled={testing}>
-                {testing ? "Đang kiểm tra..." : "In thử / Kiểm tra kết nối"}
-              </button>
-              <span className="text-sm text-slate-500">
-                Máy in đang dùng: <b>{printerTarget || "-- chưa chọn --"}</b>
-              </span>
-            </div>
-
-            {status && (
-              <div
-                className={`mt-3 rounded px-3 py-2 text-sm ${status.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                  }`}
-              >
-                {status.type === "ok" ? "🟢" : "🔴"} {status.message}
-              </div>
-            )}
-          </div>
-
-          <div className="app-card mx-auto w-full max-w-2xl flex-1 min-w-0 p-4 text-center lg:mx-0 lg:max-w-none">
-            <h3 className="text-base font-semibold text-slate-800">Xem trước hóa đơn giấy K80x45 (80mm)</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Cùng nội dung với lệnh &quot;In thử&quot; — mẫu minh họa K80 (không phải hóa đơn thật).
-            </p>
-            <div className="mt-3 flex flex-col items-center justify-center gap-3 rounded-lg bg-slate-100 p-4">
-              <pre className="mx-auto block w-[80mm] overflow-x-auto bg-white p-3 text-center font-mono text-[11px] font-bold leading-4 text-slate-800 shadow">
-                {receiptPreviewDisplay || "Đang tải mẫu..."}
-              </pre>
-              {printBillQr && billQrDataUrl ? (
-                <div className="w-[80mm] rounded border border-slate-200 bg-white p-3 shadow">
-                  <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Mã QR trên hóa đơn (trước dòng cảm ơn)
-                  </p>
-                  <img
-                    src={billQrDataUrl}
-                    alt="Mã QR thanh toán"
-                    className="mx-auto max-h-48 w-auto max-w-[40%] object-contain"
-                  />
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">{printBillQr ? "Đang tải ảnh QR..." : "Đã tắt in QR."}</p>
               )}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {activeTab === "qr" && (
-        <div className="app-card w-full p-4">
-          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <p className="mb-2 text-sm font-semibold text-slate-700">Sử dụng mã QR</p>
-              <label className="mb-1 flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={printBillQr}
-                  onCheckedChange={(checked) => onPrintBillQrChange(checked === true)}
-                />
-                Bật mã QR trên hóa đơn
-              </label>
-              <p className="mb-3 text-xs text-slate-500">
+              <Button
+                label={testing ? "Đang kiểm tra..." : "In thử / Kiểm tra kết nối"}
+                variant="secondary"
+                isLoading={testing}
+                onClick={() => void testAndSave()}
+              />
+              <Text type="supporting">
+                Máy in đang dùng: <Text weight="bold">{printerTarget || "-- chưa chọn --"}</Text>
+              </Text>
+
+              {status && (
+                <Card variant={status.type === "ok" ? "green" : "red"} padding={2}>
+                  <Text type="body">
+                    {status.type === "ok" ? "🟢" : "🔴"} {status.message}
+                  </Text>
+                </Card>
+              )}
+            </VStack>
+          </Card>
+        </VStack>
+        ) : settingsSection === "qr" ? (
+        <StackItem size="fill">
+        <VStack gap={4}>
+          <Card elevation="low" padding={4}>
+            <VStack gap={3}>
+              <Text weight="semibold">Mã QR</Text>
+              <CheckboxInput
+                label="Bật mã QR trên hóa đơn"
+                value={printBillQr}
+                onChange={(checked) => onPrintBillQrChange(checked)}
+              />
+              <Text type="supporting">
                 Khi tắt, mọi phiếu in (thanh toán, tạm tính, in lại) sẽ không kèm mã QR.
-              </p>
-              <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
-                <label className="mb-2 flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={qrUseFixedAmount}
-                    disabled={!printBillQr}
-                    onCheckedChange={(checked) => onQrUseFixedAmountChange(checked === true)}
-                  />
-                  Dùng số tiền cố định trên QR (test)
-                </label>
-                <div className={`${qrUseFixedAmount ? "" : "opacity-50"}`}>
-                  <label className="mb-1 block text-xs text-slate-500">Số tiền cố định (VNĐ)</label>
-                  <input
-                    className="app-input w-full text-right"
-                    value={qrFixedAmountDisplay}
-                    onChange={(e) => onQrFixedAmountDisplayChange(e.target.value)}
-                    placeholder="VD: 150000"
-                    disabled={!printBillQr || !qrUseFixedAmount}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className={`${printBillQr ? "" : "pointer-events-none opacity-50"}`}>
-              <label className="mb-1 block text-xs text-slate-500">Chọn QR mặc định để in bill</label>
-              <Select
+              </Text>
+              <CheckboxInput
+                label="Dùng số tiền cố định trên QR (test)"
+                value={qrUseFixedAmount}
+                isDisabled={!printBillQr}
+                onChange={(checked) => onQrUseFixedAmountChange(checked)}
+              />
+              <TextInput
+                label="Số tiền cố định (VNĐ)"
+                value={qrFixedAmountDisplay}
+                onChange={(v) => onQrFixedAmountDisplayChange(v)}
+                placeholder="VD: 150000"
+                isDisabled={!printBillQr || !qrUseFixedAmount}
+              />
+              <Selector
+                label="Chọn QR mặc định để in bill"
                 value={selectedQrThanhToanId != null ? String(selectedQrThanhToanId) : ""}
-                disabled={!printBillQr}
-                onChange={(e) => {
-                  const id = Number(e.target.value);
+                isDisabled={!printBillQr}
+                onChange={(v) => {
+                  const id = Number(v);
                   onSelectedQrThanhToanIdChange(Number.isFinite(id) && id > 0 ? id : null);
                 }}
-              >
-                <option value="">-- Chọn QR --</option>
-                {qrList.map((item) => (
-                  <option key={item.qr_thanh_toan_id} value={item.qr_thanh_toan_id}>
-                    {item.qr_thanh_toan_ten}
-                  </option>
-                ))}
-              </Select>
-              {printBillQr && billQrDataUrl && (
-                <div className="mt-3 rounded border border-slate-200 bg-white p-3">
-                  <p className="mb-2 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Preview QR đang chọn
-                  </p>
-                  <img src={billQrDataUrl} alt="Preview QR đang chọn" className="mx-auto max-h-40 w-auto object-contain" />
-                </div>
-              )}
+                options={qrSelectOptions}
+              />
               {!printBillQr && (
-                <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Đã tắt sử dụng mã QR. Bật lại để in QR trên hóa đơn.
-                </p>
+                <Card variant="yellow" padding={2}>
+                  <Text type="supporting">
+                    Đã tắt sử dụng mã QR. Bật lại để in QR trên hóa đơn.
+                  </Text>
+                </Card>
               )}
-            </div>
-          </div>
+            </VStack>
+          </Card>
 
-          <div className="w-full rounded border border-slate-200 bg-white p-3 text-left">
-            <p className="mb-2 text-sm font-semibold text-slate-700">Quản lý QR thanh toán</p>
-            <div className="mb-3 grid grid-cols-1 gap-2">
-              <input
-                className="app-input"
-                placeholder="Tên QR (vd: LE THI MY NUONG)"
-                value={newQrName}
-                onChange={(e) => setNewQrName(e.target.value)}
-              />
-              <textarea
-                className="app-input min-h-24 font-mono text-xs"
-                placeholder="Chuỗi QR tĩnh (000201010211...)"
-                value={newQrCode}
-                onChange={(e) => setNewQrCode(e.target.value)}
-              />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="btn-secondary text-sm"
-                  onClick={async () => {
-                    try {
-                      await invoke("create_qr_thanh_toan", {
-                        payload: {
-                          qr_thanh_toan_ten: newQrName,
-                          qr_code: newQrCode,
-                        },
-                      });
-                      setNewQrName("");
-                      setNewQrCode("");
-                      toast.success("Đã thêm QR mới.");
-                      await loadQrList();
-                      await reloadQrPreview();
-                    } catch (error) {
-                      toast.error(String(error));
-                    }
-                  }}
-                >
-                  Thêm QR
-                </button>
-              </div>
-            </div>
+          <Card elevation="low" padding={4}>
+            <VStack gap={3}>
+              <VStack gap={3}>
+                <Text weight="semibold">Quản lý QR thanh toán</Text>
+                <VStack gap={2}>
+                  <TextInput
+                    label="Tên QR"
+                    value={newQrName}
+                    onChange={(v) => setNewQrName(v)}
+                    placeholder="Tên QR (vd: LE THI MY NUONG)"
+                  />
+                  <TextArea
+                    label="Chuỗi QR tĩnh"
+                    value={newQrCode}
+                    onChange={(v) => setNewQrCode(v)}
+                    placeholder="Chuỗi QR tĩnh (000201010211...)"
+                    rows={4}
+                  />
+                  <HStack justify="end">
+                    <Button
+                      label="Thêm QR"
+                      variant="secondary"
+                      size="sm"
+                      clickAction={async () => {
+                        try {
+                          await invoke("create_qr_thanh_toan", {
+                            payload: {
+                              qr_thanh_toan_ten: newQrName,
+                              qr_code: newQrCode,
+                            },
+                          });
+                          setNewQrName("");
+                          setNewQrCode("");
+                          showToast({ body: "Đã thêm QR mới." });
+                          await loadQrList();
+                          await reloadQrPreview();
+                        } catch (error) {
+                          showToast({ body: String(error), type: "error" });
+                        }
+                      }}
+                    />
+                  </HStack>
+                </VStack>
 
-            <div className="space-y-2">
-              {qrList.map((item) => {
-                const isEditing = editingQrId === item.qr_thanh_toan_id;
-                return (
-                  <div key={item.qr_thanh_toan_id} className="rounded border border-slate-200 bg-white p-3">
-                    {isEditing ? (
-                      <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2 md:items-start">
-                        <div className="rounded border border-slate-100 bg-slate-50 p-3">
-                          <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Preview QR
-                          </p>
-                          {qrPreviewMap[item.qr_thanh_toan_id] ? (
-                            <img
-                              src={qrPreviewMap[item.qr_thanh_toan_id]}
-                              alt={`QR ${item.qr_thanh_toan_ten}`}
-                              className="mx-auto max-h-44 w-auto object-contain"
+                <VStack gap={2}>
+                  {qrList.map((item) => {
+                    const isEditing = editingQrId === item.qr_thanh_toan_id;
+                    return (
+                      <Card key={item.qr_thanh_toan_id} padding={3} elevation="none">
+                        {isEditing ? (
+                          <VStack gap={3}>
+                            <Card variant="muted" padding={3}>
+                              <VStack gap={2} hAlign="center">
+                                <Text type="supporting" weight="semibold" size="2xs">Preview QR</Text>
+                                {qrPreviewMap[item.qr_thanh_toan_id] ? (
+                                  <img
+                                    src={qrPreviewMap[item.qr_thanh_toan_id]}
+                                    alt={`QR ${item.qr_thanh_toan_ten}`}
+                                    className="mx-auto max-h-44 w-auto object-contain"
+                                  />
+                                ) : (
+                                  <Text type="supporting">Đang tải QR...</Text>
+                                )}
+                              </VStack>
+                            </Card>
+                            <TextInput
+                              label="Tên QR"
+                              value={editingQrName}
+                              onChange={(v) => setEditingQrName(v)}
                             />
-                          ) : (
-                            <p className="py-10 text-center text-xs text-slate-400">Đang tải QR...</p>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <input
-                            className="app-input w-full"
-                            value={editingQrName}
-                            onChange={(e) => setEditingQrName(e.target.value)}
-                          />
-                          <textarea
-                            className="app-input min-h-24 w-full font-mono text-xs"
-                            value={editingQrCode}
-                            onChange={(e) => setEditingQrCode(e.target.value)}
-                          />
-                          <div className="flex justify-end gap-2 pt-1">
-                            <button
-                              className="btn-ghost text-sm"
-                              onClick={() => {
-                                setEditingQrId(null);
-                                setEditingQrName("");
-                                setEditingQrCode("");
-                              }}
-                            >
-                              Hủy
-                            </button>
-                            <button
-                              className="btn-secondary text-sm"
-                              onClick={async () => {
-                                try {
-                                  await invoke("update_qr_thanh_toan", {
-                                    payload: {
-                                      qr_thanh_toan_id: item.qr_thanh_toan_id,
-                                      qr_thanh_toan_ten: editingQrName,
-                                      qr_code: editingQrCode,
-                                    },
-                                  });
-                                  toast.success("Đã cập nhật QR.");
-                                  setEditingQrId(null);
-                                  await loadQrList();
-                                  await reloadQrPreview();
-                                } catch (error) {
-                                  toast.error(String(error));
-                                }
-                              }}
-                            >
-                              Lưu
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold text-slate-800">{item.qr_thanh_toan_ten}</div>
-                          <div className="flex gap-2">
-                          <button
-                            className="btn-ghost text-sm"
-                            onClick={() => {
-                                setEditingQrId(item.qr_thanh_toan_id);
-                                setEditingQrName(item.qr_thanh_toan_ten);
-                                setEditingQrCode(item.qr_code);
-                              }}
-                            >
-                              Sửa
-                            </button>
-                            <button
-                              className="btn-ghost text-xs text-rose-600"
-                              onClick={async () => {
-                                if (!window.confirm(`Xóa QR "${item.qr_thanh_toan_ten}"?`)) return;
-                                try {
-                                  await invoke("delete_qr_thanh_toan", {
-                                    qrThanhToanId: item.qr_thanh_toan_id,
-                                  });
-                                  toast.success("Đã xóa QR.");
-                                  await loadQrList();
-                                  await reloadQrPreview();
-                                } catch (error) {
-                                  toast.error(String(error));
-                                }
-                              }}
-                            >
-                              Xóa
-                            </button>
-                          </div>
-                        </div>
-                        <div className="mt-2 rounded border border-slate-100 bg-slate-50 p-3">
-                          {qrPreviewMap[item.qr_thanh_toan_id] ? (
-                            <img
-                              src={qrPreviewMap[item.qr_thanh_toan_id]}
-                              alt={`QR ${item.qr_thanh_toan_ten}`}
-                              className="mx-auto max-h-44 w-auto object-contain"
+                            <TextArea
+                              label="Chuỗi QR"
+                              value={editingQrCode}
+                              onChange={(v) => setEditingQrCode(v)}
+                              rows={4}
                             />
-                          ) : (
-                            <p className="py-10 text-center text-xs text-slate-400">Đang tải QR...</p>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
+                            <HStack gap={2} justify="end">
+                                  <Button
+                                    label="Hủy"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingQrId(null);
+                                      setEditingQrName("");
+                                      setEditingQrCode("");
+                                    }}
+                                  />
+                                  <Button
+                                    label="Lưu"
+                                    variant="secondary"
+                                    size="sm"
+                                    clickAction={async () => {
+                                      try {
+                                        await invoke("update_qr_thanh_toan", {
+                                          payload: {
+                                            qr_thanh_toan_id: item.qr_thanh_toan_id,
+                                            qr_thanh_toan_ten: editingQrName,
+                                            qr_code: editingQrCode,
+                                          },
+                                        });
+                                        showToast({ body: "Đã cập nhật QR." });
+                                        setEditingQrId(null);
+                                        await loadQrList();
+                                        await reloadQrPreview();
+                                      } catch (error) {
+                                        showToast({ body: String(error), type: "error" });
+                                      }
+                                    }}
+                                  />
+                            </HStack>
+                          </VStack>
+                        ) : (
+                          <VStack gap={2}>
+                            <HStack justify="between" align="center">
+                              <Text weight="semibold">{item.qr_thanh_toan_ten}</Text>
+                              <HStack gap={2}>
+                                <Button
+                                  label="Sửa"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingQrId(item.qr_thanh_toan_id);
+                                    setEditingQrName(item.qr_thanh_toan_ten);
+                                    setEditingQrCode(item.qr_code);
+                                  }}
+                                />
+                                <Button
+                                  label="Xóa"
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => setDeleteQrTarget(item)}
+                                />
+                              </HStack>
+                            </HStack>
+                            <Card variant="muted" padding={3}>
+                              {qrPreviewMap[item.qr_thanh_toan_id] ? (
+                                <img
+                                  src={qrPreviewMap[item.qr_thanh_toan_id]}
+                                  alt={`QR ${item.qr_thanh_toan_ten}`}
+                                  className="mx-auto max-h-44 w-auto object-contain"
+                                />
+                              ) : (
+                                <Text type="supporting" justify="center" display="block">
+                                  Đang tải QR...
+                                </Text>
+                              )}
+                            </Card>
+                          </VStack>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </VStack>
+              </VStack>
+            </VStack>
+            </Card>
+        </VStack>
+        </StackItem>
+        ) : (
+        <StackItem size="fill">
+          <Card elevation="low" padding={4}>
+            <VStack gap={4}>
+              <VStack gap={1}>
+                <Text weight="semibold">Dọn dẹp dữ liệu phòng hát</Text>
+                <Text color="secondary">
+                  Chỉ xóa phiên hát và hóa đơn. Danh sách phòng, sản phẩm và mã QR được giữ nguyên.
+                </Text>
+              </VStack>
+              <Selector
+                label="Dữ liệu cần xóa"
+                value={cleanupMode}
+                onChange={(value) => setCleanupMode(value as CleanupMode)}
+                options={CLEANUP_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+              />
+              <Text color="secondary">{cleanupChoice.detail}</Text>
+              {cleanupMode === "paid_range" ? (
+                <HStack gap={2} vAlign="end" wrap="wrap">
+                  <DateInput
+                    label="Từ ngày"
+                    value={cleanupStart as ISODate}
+                    onChange={(value) => {
+                      if (value) setCleanupStart(value);
+                    }}
+                    format={(iso) => {
+                      const [year, month, day] = iso.split("-");
+                      return `${day}/${month}/${year}`;
+                    }}
+                    width={190}
+                  />
+                  <DateInput
+                    label="Đến ngày"
+                    value={cleanupEnd as ISODate}
+                    onChange={(value) => {
+                      if (value) setCleanupEnd(value);
+                    }}
+                    format={(iso) => {
+                      const [year, month, day] = iso.split("-");
+                      return `${day}/${month}/${year}`;
+                    }}
+                    width={190}
+                  />
+                </HStack>
+              ) : null}
+              <HStack>
+                <Button
+                  label="Xóa dữ liệu"
+                  variant="destructive"
+                  onClick={() => setCleanupOpen(true)}
+                />
+              </HStack>
+            </VStack>
+          </Card>
+        </StackItem>
+        )}
+
+        {settingsSection === "printer" && (
+        <StackItem size="fill">
+          <Card elevation="low" padding={4}>
+            <VStack gap={3} hAlign="center">
+              <Heading level={3}>Xem trước hóa đơn giấy K80x45 (80mm)</Heading>
+              <Text type="supporting">
+                Cùng nội dung với lệnh &quot;In thử&quot; — mẫu minh họa K80 (không phải hóa đơn thật).
+              </Text>
+              <Card variant="muted" padding={3}>
+                <VStack gap={3} hAlign="center">
+                  <pre className="mx-auto block w-[80mm] overflow-x-auto rounded bg-white p-3 text-center font-mono text-[11px] font-bold leading-4 shadow">
+                    {receiptPreviewDisplay || "Đang tải mẫu..."}
+                  </pre>
+                  {printBillQr && billQrDataUrl ? (
+                    <Card padding={3}>
+                      <VStack gap={2} hAlign="center">
+                        <Text type="supporting" weight="semibold" size="2xs">
+                          Mã QR trên hóa đơn (trước dòng cảm ơn)
+                        </Text>
+                        <img
+                          src={billQrDataUrl}
+                          alt="Mã QR thanh toán"
+                          className="mx-auto max-h-48 w-auto max-w-[40%] object-contain"
+                        />
+                      </VStack>
+                    </Card>
+                  ) : (
+                    <Text type="supporting">
+                      {printBillQr ? "Đang tải ảnh QR..." : "Đã tắt in QR."}
+                    </Text>
+                  )}
+                </VStack>
+              </Card>
+            </VStack>
+          </Card>
+        </StackItem>
+        )}
+      </HStack>
+
+      {/* Delete QR Confirmation Dialog */}
+      <Dialog
+        isOpen={deleteQrTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteQrTarget(null); }}
+        width={420}
+        purpose="required"
+      >
+        <DialogHeader title="Xác nhận xóa QR" onOpenChange={() => setDeleteQrTarget(null)} />
+        <VStack gap={3} padding={4}>
+          <Text type="body">
+            Bạn có chắc muốn xóa QR{" "}
+            <Text weight="semibold">&quot;{deleteQrTarget?.qr_thanh_toan_ten}&quot;</Text>?
+          </Text>
+          <HStack gap={2} justify="end">
+            <Button label="Hủy" variant="ghost" onClick={() => setDeleteQrTarget(null)} />
+            <Button
+              label="Xóa"
+              variant="destructive"
+              clickAction={async () => {
+                if (!deleteQrTarget) return;
+                try {
+                  await invoke("delete_qr_thanh_toan", {
+                    qrThanhToanId: deleteQrTarget.qr_thanh_toan_id,
+                  });
+                  showToast({ body: "Đã xóa QR." });
+                  setDeleteQrTarget(null);
+                  await loadQrList();
+                  await reloadQrPreview();
+                } catch (error) {
+                  showToast({ body: String(error), type: "error" });
+                }
+              }}
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+
+      <Dialog isOpen={cleanupOpen} onOpenChange={setCleanupOpen} width={460} purpose="required">
+        <DialogHeader title="Xác nhận dọn dẹp" onOpenChange={setCleanupOpen} />
+        <VStack gap={3} padding={4}>
+          <Text>{cleanupChoice.detail}</Text>
+          {cleanupMode === "paid_range" ? (
+            <Text weight="semibold">
+              Từ {cleanupStart.split("-").reverse().join("/")} đến {cleanupEnd.split("-").reverse().join("/")}
+            </Text>
+          ) : null}
+          <Text color="secondary">Thao tác này không hoàn tác được.</Text>
+          <HStack gap={2} justify="end">
+            <Button label="Hủy" variant="ghost" isDisabled={cleaning} onClick={() => setCleanupOpen(false)} />
+            <Button
+              label="Xóa"
+              variant="destructive"
+              isLoading={cleaning}
+              onClick={() => void runCleanup()}
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+    </VStack>
   );
 }

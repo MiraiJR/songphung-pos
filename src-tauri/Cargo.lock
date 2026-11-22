@@ -3944,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "songphung"
-version = "1.0.31"
+version = "1.0.32"
 dependencies = [
  "base64 0.22.1",
  "csv",

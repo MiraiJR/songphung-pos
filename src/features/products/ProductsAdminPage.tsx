@@ -2,20 +2,24 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { Download, Plus, Search, Upload, X } from "lucide-react";
-import { Select } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Download, Plus, Upload } from "lucide-react";
 import type { Product, ProductGroup } from "@/types/karaoke";
 import { formatInvokeError } from "@/utils/invokeError";
+
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Text } from "@astryxdesign/core/Text";
+import { Card } from "@astryxdesign/core/Card";
+import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { VStack } from "@astryxdesign/core/VStack";
+import { HStack } from "@astryxdesign/core/HStack";
+import { StackItem } from "@astryxdesign/core/Stack";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Table, proportional, pixel } from "@astryxdesign/core/Table";
+import { useToast } from "@astryxdesign/core/Toast";
 
 type FormData = {
   san_pham_id: string;
@@ -46,7 +50,17 @@ function dialogPath(selected: string | string[] | null): string | null {
   return Array.isArray(selected) ? (selected[0] ?? null) : selected;
 }
 
+interface ProductRow extends Record<string, unknown> {
+  san_pham_id: string;
+  ten_san_pham: string;
+  nhom_san_pham_id: number | null;
+  don_vi_tinh: string;
+  don_gia: number;
+  groupName: string;
+}
+
 export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDelete, onReloadMaster }: Props) {
+  const showToast = useToast();
   const form = useForm<FormData>({
     defaultValues: { don_vi_tinh: "", don_gia: 0 },
   });
@@ -71,6 +85,26 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
     return byName && byGroup;
   });
 
+  const tableData: ProductRow[] = filteredProducts.map((product) => ({
+    san_pham_id: product.san_pham_id,
+    ten_san_pham: product.ten_san_pham,
+    nhom_san_pham_id: product.nhom_san_pham_id,
+    don_vi_tinh: product.don_vi_tinh,
+    don_gia: product.don_gia,
+    groupName:
+      groups.find((g) => g.nhom_san_pham_id === product.nhom_san_pham_id)?.ten_nhom ?? "--",
+  }));
+
+  const groupOptions = [
+    { value: "", label: "Tất cả nhóm" },
+    ...groups.map((g) => ({ value: String(g.nhom_san_pham_id), label: g.ten_nhom })),
+  ];
+
+  const groupSelectorOptions = [
+    { value: "", label: "Không nhóm" },
+    ...groups.map((g) => ({ value: String(g.nhom_san_pham_id), label: g.ten_nhom })),
+  ];
+
   async function handleExportSanPhamTemplate() {
     setCsvBusy(true);
     try {
@@ -78,9 +112,9 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       const dir = dialogPath(selected);
       if (!dir) return;
       await invoke("export_san_pham_template", { dirPath: dir });
-      window.alert(`Đã tạo san_pham.csv trong thư mục:\n${dir}`);
+      showToast({ body: `Đã tạo san_pham.csv trong thư mục:\n${dir}` });
     } catch (e) {
-      window.alert(formatInvokeError(e));
+      showToast({ body: formatInvokeError(e), type: "error" });
     } finally {
       setCsvBusy(false);
     }
@@ -96,10 +130,10 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       const path = dialogPath(selected);
       if (!path) return;
       const stats = await invoke<CsvImportStats>("import_products_csv", { filePath: path });
-      window.alert(stats.message);
+      showToast({ body: stats.message });
       await onReloadMaster?.();
     } catch (e) {
-      window.alert(formatInvokeError(e));
+      showToast({ body: formatInvokeError(e), type: "error" });
     } finally {
       setCsvBusy(false);
     }
@@ -117,320 +151,314 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
   }
 
   return (
-    <section className="p-4">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Danh sách sản phẩm</h2>
-          <p className="mt-1 text-sm text-slate-500">Quản lý món bán, đơn giá và nhóm sản phẩm.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center gap-2"
-            disabled={csvBusy}
+    <VStack gap={4} padding={4}>
+      <HStack justify="between" align="start" wrap="wrap" gap={3}>
+        <VStack gap={0.5}>
+          <Heading level={2}>Danh sách sản phẩm</Heading>
+          <Text type="supporting">Quản lý món bán, đơn giá và nhóm sản phẩm.</Text>
+        </VStack>
+        <HStack gap={2} wrap="wrap">
+          <Button
+            label="Tải mẫu CSV sản phẩm"
+            variant="secondary"
+            icon={<Icon icon={Download} />}
+            isDisabled={csvBusy}
             onClick={() => void handleExportSanPhamTemplate()}
-          >
-            <Download size={16} />
-            Tải mẫu CSV sản phẩm
-          </button>
-          <button
-            type="button"
-            className="btn-secondary inline-flex items-center gap-2"
-            disabled={csvBusy}
+          />
+          <Button
+            label="Import sản phẩm CSV"
+            variant="secondary"
+            icon={<Icon icon={Upload} />}
+            isDisabled={csvBusy}
             onClick={() => void handleImportProductsCsv()}
-          >
-            <Upload size={16} />
-            Import sản phẩm CSV
-          </button>
-          <button className="btn-primary inline-flex items-center gap-2" onClick={() => setCreateModalOpen(true)}>
-            <Plus size={16} />
-            Thêm sản phẩm mới
-          </button>
-        </div>
-      </div>
+          />
+          <Button
+            label="Thêm sản phẩm mới"
+            variant="primary"
+            icon={<Icon icon={Plus} />}
+            onClick={() => setCreateModalOpen(true)}
+          />
+        </HStack>
+      </HStack>
 
-      <div className="app-card mb-4 p-3">
-        <div className="grid grid-cols-[1fr,220px,220px] gap-3">
-          <label className="relative block">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              className="app-input w-full pl-9"
-              placeholder="Tìm theo tên sản phẩm..."
+      <Card elevation="low" padding={3}>
+        <HStack gap={3} align="center" wrap="wrap">
+          <StackItem size="fill">
+            <TextInput
+              label="Tìm kiếm"
+              isLabelHidden
               value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
+              onChange={(v) => setSearchKeyword(v)}
+              placeholder="Tìm theo tên sản phẩm..."
+              startIcon="search"
+              hasClear
             />
-          </label>
-          <Select value={filterGroupId} onChange={(e) => setFilterGroupId(e.target.value)}>
-            <option value="">Tất cả nhóm</option>
-            {groups.map((group) => (
-              <option key={group.nhom_san_pham_id} value={String(group.nhom_san_pham_id)}>
-                {group.ten_nhom}
-              </option>
-            ))}
-          </Select>
-          <div className="flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-sm">
-            Tổng cộng: <span className="ml-1 font-bold text-slate-800">{filteredProducts.length} sản phẩm</span>
-          </div>
-        </div>
-      </div>
+          </StackItem>
+          <Selector
+            label="Nhóm sản phẩm"
+            isLabelHidden
+            value={filterGroupId}
+            onChange={(v) => setFilterGroupId(v)}
+            options={groupOptions}
+            width={220}
+          />
+          <Text type="body" weight="semibold">
+            Tổng cộng: {filteredProducts.length} sản phẩm
+          </Text>
+        </HStack>
+      </Card>
 
-      <div className="app-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="bg-slate-50 text-left text-sm font-semibold text-slate-700">
-                <th className="border-b px-4 py-3">Mã</th>
-                <th className="border-b px-4 py-3">Tên sản phẩm</th>
-                <th className="border-b px-4 py-3">Nhóm</th>
-                <th className="border-b px-4 py-3">Đơn vị</th>
-                <th className="border-b px-4 py-3 text-right">Đơn giá</th>
-                <th className="border-b px-4 py-3 text-right">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product) => {
-                const groupName =
-                  groups.find((group) => group.nhom_san_pham_id === product.nhom_san_pham_id)?.ten_nhom ?? "--";
+      <Card elevation="low" padding={0}>
+        <Table<ProductRow>
+          data={tableData}
+          idKey="san_pham_id"
+          density="balanced"
+          hasHover
+          columns={[
+            {
+              key: "san_pham_id",
+              header: "Mã",
+              width: pixel(100),
+              renderCell: (row) => <Text weight="semibold">{row.san_pham_id}</Text>,
+            },
+            {
+              key: "ten_san_pham",
+              header: "Tên sản phẩm",
+              width: proportional(2),
+              renderCell: (row) => <Text weight="medium">{row.ten_san_pham}</Text>,
+            },
+            {
+              key: "groupName",
+              header: "Nhóm",
+              width: proportional(1),
+              renderCell: (row) => <Badge label={row.groupName} variant="neutral" />,
+            },
+            {
+              key: "don_vi_tinh",
+              header: "Đơn vị",
+              width: pixel(100),
+            },
+            {
+              key: "don_gia",
+              header: "Đơn giá",
+              width: pixel(140),
+              align: "end",
+              renderCell: (row) => (
+                <Text weight="semibold" size="lg">{row.don_gia.toLocaleString()}</Text>
+              ),
+            },
+            {
+              key: "actions",
+              header: "Thao tác",
+              width: pixel(160),
+              align: "end",
+              renderCell: (row) => {
+                const product = products.find((p) => p.san_pham_id === row.san_pham_id)!;
                 return (
-                  <tr key={product.san_pham_id} className="hover:bg-slate-50">
-                    <td className="border-b px-4 py-3 font-semibold text-slate-800">{product.san_pham_id}</td>
-                    <td className="border-b px-4 py-3 font-medium">{product.ten_san_pham}</td>
-                    <td className="border-b px-4 py-3">
-                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {groupName}
-                      </span>
-                    </td>
-                    <td className="border-b px-4 py-3">{product.don_vi_tinh}</td>
-                    <td className="border-b px-4 py-3 text-right text-lg font-semibold text-slate-700">
-                      {product.don_gia.toLocaleString()}
-                    </td>
-                    <td className="border-b px-4 py-3 text-right">
-                      <button
-                        className="mr-2 rounded-md bg-slate-100 px-3 py-1 text-slate-700"
-                        onClick={() => {
-                          setEditingProduct(product);
-                          setEditTenSanPham(product.ten_san_pham);
-                          setEditDonViTinh(product.don_vi_tinh);
-                          setEditDonGia(String(product.don_gia));
-                          setEditNhomId(
-                            product.nhom_san_pham_id ? String(product.nhom_san_pham_id) : "",
-                          );
-                        }}
-                      >
-                        Sửa
-                      </button>
-                      <button
-                        className="rounded-md bg-rose-100 px-3 py-1 text-rose-700"
-                        onClick={() => setDeleteTarget(product)}
-                      >
-                        Xóa
-                      </button>
-                    </td>
-                  </tr>
+                  <HStack gap={1}>
+                    <Button
+                      label="Sửa"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setEditingProduct(product);
+                        setEditTenSanPham(product.ten_san_pham);
+                        setEditDonViTinh(product.don_vi_tinh);
+                        setEditDonGia(String(product.don_gia));
+                        setEditNhomId(
+                          product.nhom_san_pham_id ? String(product.nhom_san_pham_id) : "",
+                        );
+                      }}
+                    />
+                    <Button
+                      label="Xóa"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setDeleteTarget(product)}
+                    />
+                  </HStack>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 text-sm text-slate-500">
-          <span>
+              },
+            },
+          ]}
+          emptyState={
+            <Text type="supporting" display="block" justify="center">
+              Không có sản phẩm nào.
+            </Text>
+          }
+        />
+        <HStack padding={3} justify="between" align="center">
+          <Text type="supporting">
             Hiển thị 1 đến {filteredProducts.length} của {filteredProducts.length} sản phẩm
-          </span>
-          <div className="flex items-center gap-2">
-            <button className="h-8 w-8 rounded border border-slate-200 bg-white text-slate-400">‹</button>
-            <button className="h-8 w-8 rounded bg-primary text-white">1</button>
-            <button className="h-8 w-8 rounded border border-slate-200 bg-white text-slate-500">›</button>
-          </div>
-        </div>
-      </div>
-      {createModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="relative w-[560px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              onClick={() => setCreateModalOpen(false)}
-              aria-label="Đóng"
-            >
-              <X size={18} />
-            </button>
-            <h3 className="mb-3 text-lg font-semibold">Thêm sản phẩm</h3>
-            <form
-              className="grid grid-cols-2 gap-2"
-              onSubmit={form.handleSubmit(async (data) => {
+          </Text>
+        </HStack>
+      </Card>
+
+      {/* Create Product Dialog */}
+      <Dialog isOpen={createModalOpen} onOpenChange={setCreateModalOpen} width={560} purpose="form">
+        <DialogHeader title="Thêm sản phẩm" onOpenChange={setCreateModalOpen} />
+        <VStack gap={2} padding={4}>
+          <HStack gap={2}>
+            <StackItem size="fill">
+              <TextInput
+                label="Mã"
+                value={form.watch("san_pham_id") ?? ""}
+                onChange={(v) => form.setValue("san_pham_id", v)}
+                placeholder="VD: BIA01"
+              />
+            </StackItem>
+            <StackItem size="fill">
+              <TextInput
+                label="Tên"
+                value={form.watch("ten_san_pham") ?? ""}
+                onChange={(v) => form.setValue("ten_san_pham", v)}
+                placeholder="Tên sản phẩm"
+              />
+            </StackItem>
+          </HStack>
+          <HStack gap={2}>
+            <StackItem size="fill">
+              <TextInput
+                label="Đơn vị"
+                value={form.watch("don_vi_tinh") ?? ""}
+                onChange={(v) => form.setValue("don_vi_tinh", v)}
+                placeholder="VD: lon, chai, phần"
+              />
+            </StackItem>
+            <StackItem size="fill">
+              <TextInput
+                label="Đơn giá"
+                value={createDonGiaInput}
+                onChange={(v) => {
+                  const digits = v.replace(/\D/g, "");
+                  setCreateDonGiaInput(digits ? Number(digits).toLocaleString("en-US") : "");
+                  form.setValue("don_gia", digits ? Number(digits) : 0, { shouldValidate: true });
+                }}
+                placeholder="VD: 10,000"
+                inputMode="numeric"
+              />
+            </StackItem>
+          </HStack>
+          <Selector
+            label="Nhóm"
+            value={form.watch("nhom_san_pham_id") ?? ""}
+            onChange={(v) => form.setValue("nhom_san_pham_id", v)}
+            options={groupSelectorOptions}
+          />
+          <HStack gap={2} justify="end" padding={1}>
+            <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
+            <Button
+              label="Tạo sản phẩm"
+              variant="primary"
+              clickAction={async () => {
+                const data = form.getValues();
                 if (!data.san_pham_id || !data.ten_san_pham || !data.don_vi_tinh || data.don_gia <= 0) return;
                 await onCreate(data);
                 form.reset({ san_pham_id: "", ten_san_pham: "", don_vi_tinh: "", don_gia: 0, nhom_san_pham_id: "" });
                 setCreateDonGiaInput("");
                 setCreateModalOpen(false);
-              })}
-            >
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Mã</label>
-                <input className="app-input w-full" placeholder="VD: BIA01" {...form.register("san_pham_id")} />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Tên</label>
-                <input className="app-input w-full" placeholder="Tên sản phẩm" {...form.register("ten_san_pham")} />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Đơn vị</label>
-                <input className="app-input w-full" placeholder="VD: lon, chai, phần" {...form.register("don_vi_tinh")} />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Đơn giá</label>
-                <input
-                  className="app-input w-full"
-                  placeholder="VD: 10,000"
-                  inputMode="numeric"
-                  value={createDonGiaInput}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/\D/g, "");
-                    setCreateDonGiaInput(digits ? Number(digits).toLocaleString("en-US") : "");
-                    form.setValue("don_gia", digits ? Number(digits) : 0, { shouldValidate: true });
-                  }}
-                />
-              </div>
-              <div className="col-span-2">
-                <label className="mb-1 block text-sm text-slate-600">Nhóm</label>
-                <Select className="w-full" {...form.register("nhom_san_pham_id")}>
-                  <option value="">Không nhóm</option>
-                  {groups.map((group) => (
-                    <option key={group.nhom_san_pham_id} value={String(group.nhom_san_pham_id)}>
-                      {group.ten_nhom}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="col-span-2 mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => setCreateModalOpen(false)}
-                >
-                  Hủy
-                </button>
-                <button className="btn-primary" type="submit">
-                  Tạo sản phẩm
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {editingProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-[1px]">
-          <div className="relative w-[520px] rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-              onClick={() => setEditingProduct(null)}
-              aria-label="Đóng"
-            >
-              <X size={18} />
-            </button>
-            <h3 className="mb-3 text-lg font-semibold">Sửa sản phẩm</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Mã sản phẩm</label>
-                <input
-                  className="w-full rounded border bg-slate-100 px-2 py-1"
-                  value={editingProduct.san_pham_id}
-                  disabled
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Tên sản phẩm</label>
-                <input
-                  className="app-input w-full"
-                  value={editTenSanPham}
-                  onChange={(e) => setEditTenSanPham(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Đơn vị</label>
-                <input
-                  className="app-input w-full"
-                  value={editDonViTinh}
-                  onChange={(e) => setEditDonViTinh(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm text-slate-600">Đơn giá</label>
-                <input
-                  className="app-input w-full"
-                  value={editDonGia}
-                  onChange={(e) => setEditDonGia(e.target.value.replace(/[^0-9]/g, ""))}
-                />
-              </div>
-              <div className="col-span-2">
-                <label className="mb-1 block text-sm text-slate-600">Nhóm</label>
-                <Select className="w-full" value={editNhomId} onChange={(e) => setEditNhomId(e.target.value)}>
-                  <option value="">Không nhóm</option>
-                  {groups.map((group) => (
-                    <option key={group.nhom_san_pham_id} value={String(group.nhom_san_pham_id)}>
-                      {group.ten_nhom}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="btn-ghost" onClick={() => setEditingProduct(null)}>
-                Hủy
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={async () => {
-                  if (!editTenSanPham || !editDonViTinh || Number(editDonGia) <= 0) return;
-                  await onUpdate({
-                    san_pham_id: editingProduct.san_pham_id,
-                    ten_san_pham: editTenSanPham,
-                    don_vi_tinh: editDonViTinh,
-                    don_gia: Number(editDonGia),
-                    nhom_san_pham_id: editNhomId || "",
-                  });
-                  setEditingProduct(null);
-                }}
-              >
-                Lưu thay đổi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open && !deleting) setDeleteTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-rose-600">Xác nhận xóa sản phẩm</AlertDialogTitle>
-            <AlertDialogDescription>
-              Bạn có chắc chắn muốn xóa sản phẩm{" "}
-              <span className="font-semibold text-slate-900">
-                {deleteTarget?.ten_san_pham ?? ""}
-              </span>{" "}
-              (<span className="font-mono">{deleteTarget?.san_pham_id ?? ""}</span>)? Hành động này không thể hoàn tác.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Hủy</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={deleting}
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDeleteProduct();
               }}
-            >
-              {deleting ? "Đang xóa..." : "Xóa"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </section>
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+
+      {/* Edit Product Dialog */}
+      <Dialog
+        isOpen={editingProduct !== null}
+        onOpenChange={(open) => { if (!open) setEditingProduct(null); }}
+        width={520}
+        purpose="form"
+      >
+        <DialogHeader title="Sửa sản phẩm" onOpenChange={() => setEditingProduct(null)} />
+        <VStack gap={2} padding={4}>
+          <HStack gap={2}>
+            <StackItem size="fill">
+              <TextInput
+                label="Mã sản phẩm"
+                value={editingProduct?.san_pham_id ?? ""}
+                isDisabled
+                onChange={() => {}}
+              />
+            </StackItem>
+            <StackItem size="fill">
+              <TextInput
+                label="Tên sản phẩm"
+                value={editTenSanPham}
+                onChange={(v) => setEditTenSanPham(v)}
+              />
+            </StackItem>
+          </HStack>
+          <HStack gap={2}>
+            <StackItem size="fill">
+              <TextInput
+                label="Đơn vị"
+                value={editDonViTinh}
+                onChange={(v) => setEditDonViTinh(v)}
+              />
+            </StackItem>
+            <StackItem size="fill">
+              <TextInput
+                label="Đơn giá"
+                value={editDonGia}
+                onChange={(v) => setEditDonGia(v.replace(/[^0-9]/g, ""))}
+                inputMode="numeric"
+              />
+            </StackItem>
+          </HStack>
+          <Selector
+            label="Nhóm"
+            value={editNhomId}
+            onChange={(v) => setEditNhomId(v)}
+            options={groupSelectorOptions}
+          />
+          <HStack gap={2} justify="end" padding={1}>
+            <Button label="Hủy" variant="ghost" onClick={() => setEditingProduct(null)} />
+            <Button
+              label="Lưu thay đổi"
+              variant="secondary"
+              clickAction={async () => {
+                if (!editingProduct) return;
+                if (!editTenSanPham || !editDonViTinh || Number(editDonGia) <= 0) return;
+                await onUpdate({
+                  san_pham_id: editingProduct.san_pham_id,
+                  ten_san_pham: editTenSanPham,
+                  don_vi_tinh: editDonViTinh,
+                  don_gia: Number(editDonGia),
+                  nhom_san_pham_id: editNhomId || "",
+                });
+                setEditingProduct(null);
+              }}
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        isOpen={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}
+        width={420}
+        purpose="required"
+      >
+        <DialogHeader title="Xác nhận xóa sản phẩm" onOpenChange={() => { if (!deleting) setDeleteTarget(null); }} />
+        <VStack gap={3} padding={4}>
+          <Text type="body">
+            Bạn có chắc chắn muốn xóa sản phẩm{" "}
+            <Text weight="semibold">{deleteTarget?.ten_san_pham ?? ""}</Text>{" "}
+            (<Text type="code">{deleteTarget?.san_pham_id ?? ""}</Text>)? Hành động này không thể hoàn tác.
+          </Text>
+          <HStack gap={2} justify="end">
+            <Button label="Hủy" variant="ghost" isDisabled={deleting} onClick={() => setDeleteTarget(null)} />
+            <Button
+              label={deleting ? "Đang xóa..." : "Xóa"}
+              variant="destructive"
+              isLoading={deleting}
+              clickAction={async () => { await confirmDeleteProduct(); }}
+            />
+          </HStack>
+        </VStack>
+      </Dialog>
+    </VStack>
   );
 }

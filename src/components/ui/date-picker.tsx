@@ -105,7 +105,7 @@ export function DatePicker({ value, onChange }: Props) {
       <button
         ref={triggerRef}
         type="button"
-        className="inline-flex h-12 min-w-[230px] items-center justify-between rounded-xl border-2 border-primary/80 bg-white px-4 text-lg font-semibold text-primary shadow-sm transition hover:bg-slate-50"
+        className="inline-flex h-12 min-w-[230px] items-center justify-between rounded-xl border-2 border-[#0F4C5C]/80 bg-white px-4 text-lg font-semibold text-[#0F4C5C] shadow-sm transition hover:bg-slate-50"
         onClick={() => {
           setOpen((prev) => {
             const next = !prev;
@@ -186,7 +186,7 @@ export function DatePicker({ value, onChange }: Props) {
                     key={dateValue}
                     type="button"
                     className={`h-9 rounded-md text-sm ${
-                      isSelected ? "bg-primary text-white" : "text-slate-700 hover:bg-slate-100"
+                      isSelected ? "bg-[#0F4C5C] text-white" : "text-slate-700 hover:bg-slate-100"
                     }`}
                     onClick={() => {
                       onChange(dateValue);

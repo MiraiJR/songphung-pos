@@ -1,18 +1,26 @@
 {
   "name": "songphung",
   "private": true,
-  "version": "1.0.31",
+  "version": "1.0.32",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "astryx": "node node_modules/@astryxdesign/cli/clients/cli/bin/astryx.mjs"
   },
+  "browserslist": [
+    "last 1 Chrome version"
+  ],
   "dependencies": {
+    "@astryxdesign/cli": "^0.7.17",
+    "@astryxdesign/core": "^0.7.17",
+    "@astryxdesign/theme-neutral": "^0.7.17",
     "@fontsource-variable/geist": "^5.2.8",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-select": "^2.2.6",
+    "@stylexjs/stylex": "^0.19.2",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "2",
     "@tauri-apps/plugin-opener": "^2",
@@ -33,13 +41,14 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.5",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.5.0",
     "postcss": "^8.5.12",
-    "tailwindcss": "3.4.17",
+    "tailwindcss": "4",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"

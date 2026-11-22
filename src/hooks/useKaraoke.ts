@@ -23,6 +23,11 @@ export function useKaraoke() {
     [rooms, selectedRoomId],
   );
 
+  const loadRooms = useCallback(async () => {
+    const roomData = await invoke<Room[]>("list_rooms");
+    setRooms(roomData);
+  }, []);
+
   const loadMasterData = useCallback(async () => {
     await invoke("seed_demo_data");
     const [roomData, productData, groupData] = await Promise.all([
@@ -45,8 +50,11 @@ export function useKaraoke() {
     setCurrentSession(session);
   }, []);
 
-  const loadHistory = useCallback(async (date?: string) => {
-    const data = await invoke<PaidHistory[]>("list_paid_history", { date: date || null });
+  const loadHistory = useCallback(async (startDate?: string, endDate?: string) => {
+    const data = await invoke<PaidHistory[]>("list_paid_history", {
+      startDate: startDate || null,
+      endDate: endDate || null,
+    });
     setHistories(data);
   }, []);
 
@@ -87,6 +95,7 @@ export function useKaraoke() {
     setSelectedRoomId,
     setHistoryItems,
     loadMasterData,
+    loadRooms,
     loadCurrentSession,
     loadHistory,
     loadHistoryDetail,

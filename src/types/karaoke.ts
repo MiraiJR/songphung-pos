@@ -5,6 +5,8 @@ export type Room = {
   ten_phong: string;
   tien_gio: number;
   trang_thai: "TRONG" | "DANG_HOAT_DONG";
+  gio_bat_dau?: string | null;
+  tong_tien_san_pham?: number;
 };
 
 export const ROOM_STATUS_LABEL: Record<Room["trang_thai"], string> = {
