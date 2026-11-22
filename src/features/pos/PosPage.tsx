@@ -437,55 +437,56 @@ export function PosPage(props: Props) {
         <VStack>
           <DialogHeader
             title="Chuyển phòng"
-            subtitle="Chọn phòng trống để chuyển toàn bộ phiên và món đang gọi."
+            subtitle={
+              selectedRoom
+                ? `Đang hát tại ${selectedRoom.ten_phong}. Bấm phòng trống để chuyển phiên và món.`
+                : "Bấm phòng trống để chuyển phiên và món."
+            }
             onOpenChange={(next) => {
               if (!next && !transferSubmitting) setTransferModalOpen(false);
             }}
           />
-          <VStack padding={4} gap={3}>
+          <VStack padding={4} gap={2}>
             {emptyRoomsForTransfer.length === 0 ? (
               <EmptyState
                 title="Không còn phòng trống"
-                description="Vui lòng thử lại sau."
+                description="Tất cả phòng khác đang hát."
                 isCompact
               />
             ) : (
-              <ScrollableArea label="Phòng trống" height={280}>
-                <VStack gap={1}>
-                  {emptyRoomsForTransfer.map((room) => (
-                    <Button
-                      key={room.phong_id}
-                      label={`${room.ten_phong} · ${Math.ceil(room.tien_gio).toLocaleString()} đ/giờ`}
-                      variant="secondary"
-                      width="100%"
-                      isDisabled={transferSubmitting}
-                      isLoading={transferSubmitting}
-                      onClick={() => {
-                        void (async () => {
-                          setTransferSubmitting(true);
-                          try {
-                            await onTransferRoom(room.phong_id);
-                            setTransferModalOpen(false);
-                          } catch (err) {
-                            window.alert(String(err));
-                          } finally {
-                            setTransferSubmitting(false);
-                          }
-                        })();
-                      }}
-                    />
-                  ))}
-                </VStack>
-              </ScrollableArea>
+              <VStack gap={2}>
+                {emptyRoomsForTransfer.map((room) => (
+                  <ClickableCard
+                    key={room.phong_id}
+                    label={`Chuyển sang ${room.ten_phong}`}
+                    elevation="low"
+                    padding={3}
+                    isDisabled={transferSubmitting}
+                    onClick={() => {
+                      if (transferSubmitting) return;
+                      void (async () => {
+                        setTransferSubmitting(true);
+                        try {
+                          await onTransferRoom(room.phong_id);
+                          setTransferModalOpen(false);
+                        } catch (err) {
+                          window.alert(String(err));
+                        } finally {
+                          setTransferSubmitting(false);
+                        }
+                      })();
+                    }}
+                  >
+                    <HStack hAlign="between" vAlign="center">
+                      <Text weight="semibold">{room.ten_phong}</Text>
+                      <Text color="secondary" hasTabularNumbers>
+                        {Math.ceil(room.tien_gio).toLocaleString("vi-VN")} đ/giờ
+                      </Text>
+                    </HStack>
+                  </ClickableCard>
+                ))}
+              </VStack>
             )}
-            <HStack hAlign="end">
-              <Button
-                label="Đóng"
-                variant="ghost"
-                isDisabled={transferSubmitting}
-                onClick={() => setTransferModalOpen(false)}
-              />
-            </HStack>
           </VStack>
         </VStack>
       </Dialog>

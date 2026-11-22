@@ -1,7 +1,9 @@
 import { useLocation } from "react-router-dom";
 import { TopNav, TopNavHeading, TopNavItem } from "@astryxdesign/core/TopNav";
 import { HStack } from "@astryxdesign/core/Stack";
+import { Text } from "@astryxdesign/core/Text";
 import { AstryxRouterLink } from "@/lib/astryxRouterLink";
+import { version } from "../../package.json";
 
 const NAV_ITEMS = [
   { label: "POS", to: "/" },
@@ -31,6 +33,11 @@ export function AppHeader() {
               height={28}
               style={{ borderRadius: 6 }}
             />
+          }
+          headerEndContent={
+            <Text size="sm" color="secondary">
+              v{version}
+            </Text>
           }
         />
       }
