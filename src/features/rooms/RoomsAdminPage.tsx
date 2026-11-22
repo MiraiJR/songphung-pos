@@ -10,7 +10,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { VStack } from "@astryxdesign/core/VStack";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Badge } from "@astryxdesign/core/Badge";
@@ -237,6 +237,7 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
       {/* Create Room Dialog */}
       <Dialog isOpen={createModalOpen} onOpenChange={setCreateModalOpen} width={420} purpose="form">
         <DialogHeader title="Thêm phòng" onOpenChange={setCreateModalOpen} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <TextInput
             label="Tên phòng"
@@ -255,16 +256,18 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
             placeholder="Đơn giá giờ (VD: 180,000)"
             inputMode="numeric"
           />
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
-            <Button label="Tạo phòng" variant="primary" onClick={() => void submit()} />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
+          <Button label="Tạo phòng" variant="primary" onClick={() => void submit()} />
+        </DialogFooter>
       </Dialog>
 
       {/* Edit Room Dialog */}
       <Dialog isOpen={editModalOpen} onOpenChange={setEditModalOpen} width={420} purpose="form">
         <DialogHeader title="Sửa thông tin phòng" onOpenChange={setEditModalOpen} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <TextInput
             label="Mã phòng"
@@ -299,11 +302,12 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
             inputMode="numeric"
           />
           <Text type="supporting">Loại phòng sẽ tự đồng bộ vào tên (ví dụ: VIP-1).</Text>
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setEditModalOpen(false)} />
-            <Button label="Lưu thay đổi" variant="secondary" onClick={() => void submitEdit()} />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setEditModalOpen(false)} />
+          <Button label="Lưu thay đổi" variant="secondary" onClick={() => void submitEdit()} />
+        </DialogFooter>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
@@ -314,25 +318,27 @@ export function RoomsAdminPage({ rooms, onCreate, onUpdate, onDelete }: Props) {
         purpose="required"
       >
         <DialogHeader title="Xác nhận xóa phòng" onOpenChange={() => setConfirmDeleteRoom(null)} />
+        <DialogBody>
         <VStack gap={3} padding={4}>
           <Text type="body">
             Bạn có chắc muốn xóa phòng{" "}
             <Text weight="semibold">{confirmDeleteRoom?.ten_phong}</Text> không?
           </Text>
           <Text type="supporting" color="accent">Hành động này không thể hoàn tác.</Text>
-          <HStack gap={2} justify="end">
-            <Button label="Hủy" variant="ghost" onClick={() => setConfirmDeleteRoom(null)} />
-            <Button
-              label="Xóa phòng"
-              variant="destructive"
-              clickAction={async () => {
-                if (!confirmDeleteRoom) return;
-                await onDelete(confirmDeleteRoom.phong_id);
-                setConfirmDeleteRoom(null);
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setConfirmDeleteRoom(null)} />
+          <Button
+            label="Xóa phòng"
+            variant="destructive"
+            clickAction={async () => {
+              if (!confirmDeleteRoom) return;
+              await onDelete(confirmDeleteRoom.phong_id);
+              setConfirmDeleteRoom(null);
+            }}
+          />
+        </DialogFooter>
       </Dialog>
     </VStack>
   );

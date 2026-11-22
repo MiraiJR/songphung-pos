@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
-import { Divider } from "@astryxdesign/core/Divider";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 
 type Props = {
@@ -38,13 +37,13 @@ export function ConfirmBillActionModal({
       purpose="form"
       padding={0}
     >
-      <VStack>
-        <DialogHeader
-          title={title}
-          onOpenChange={(next) => {
-            if (!next && !busy) onClose();
-          }}
-        />
+      <DialogHeader
+        title={title}
+        onOpenChange={(next) => {
+          if (!next && !busy) onClose();
+        }}
+      />
+      <DialogBody>
         <HStack gap={5} padding={5} vAlign="start" wrap="wrap">
           <VStack gap={3} width={420} maxWidth="100%">
             {leftContent}
@@ -53,18 +52,17 @@ export function ConfirmBillActionModal({
             {rightContent}
           </VStack>
         </HStack>
-        <Divider />
-        <HStack gap={2} hAlign="end" padding={4}>
-          <Button label={cancelText} variant="ghost" isDisabled={busy} onClick={onClose} />
-          <Button
-            label={confirmText}
-            variant="primary"
-            isLoading={busy}
-            isDisabled={busy}
-            onClick={onConfirm}
-          />
-        </HStack>
-      </VStack>
+      </DialogBody>
+      <DialogFooter>
+        <Button label={cancelText} variant="ghost" isDisabled={busy} onClick={onClose} />
+        <Button
+          label={confirmText}
+          variant="primary"
+          isLoading={busy}
+          isDisabled={busy}
+          onClick={onConfirm}
+        />
+      </DialogFooter>
     </Dialog>
   );
 }

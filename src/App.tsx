@@ -4,13 +4,13 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useToast } from "@astryxdesign/core/Toast";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
+import { VStack } from "@astryxdesign/core/Stack";
 import { AppHeader } from "@/components/AppHeader";
 import { BillTemplatePreview } from "@/components/billing/BillTemplatePreview";
 import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionModal";
@@ -752,17 +752,17 @@ function SongPhungShell() {
                 purpose="form"
                 padding={0}
               >
-                <VStack>
-                  <DialogHeader
-                    title={selectedProduct?.ten_san_pham ?? "Nhập số lượng"}
-                    subtitle="Nhập số lượng"
-                    onOpenChange={(next) => {
-                      if (!next && !orderSubmitting) {
-                        setOrderModalOpen(false);
-                        setSelectedProduct(null);
-                      }
-                    }}
-                  />
+                <DialogHeader
+                  title={selectedProduct?.ten_san_pham ?? "Nhập số lượng"}
+                  subtitle="Nhập số lượng"
+                  onOpenChange={(next) => {
+                    if (!next && !orderSubmitting) {
+                      setOrderModalOpen(false);
+                      setSelectedProduct(null);
+                    }
+                  }}
+                />
+                <DialogBody>
                   <VStack padding={4} gap={3}>
                     <TextInput
                       label="Số lượng"
@@ -801,19 +801,19 @@ function SongPhungShell() {
                         />
                       ))}
                     </Grid>
-                    <HStack hAlign="end">
-                      <Button
-                        label="Hủy"
-                        variant="ghost"
-                        isDisabled={orderSubmitting}
-                        onClick={() => {
-                          setOrderModalOpen(false);
-                          setSelectedProduct(null);
-                        }}
-                      />
-                    </HStack>
                   </VStack>
-                </VStack>
+                </DialogBody>
+                <DialogFooter>
+                  <Button
+                    label="Hủy"
+                    variant="ghost"
+                    isDisabled={orderSubmitting}
+                    onClick={() => {
+                      setOrderModalOpen(false);
+                      setSelectedProduct(null);
+                    }}
+                  />
+                </DialogFooter>
               </Dialog>
               <Dialog
                 isOpen={cancelModalOpen}
@@ -824,34 +824,34 @@ function SongPhungShell() {
                 purpose="required"
                 padding={0}
               >
-                <VStack>
-                  <DialogHeader
-                    title="Xác nhận trả phòng"
-                    onOpenChange={(next) => {
-                      if (!next && !cancelSubmitting) setCancelModalOpen(false);
-                    }}
-                  />
+                <DialogHeader
+                  title="Xác nhận trả phòng"
+                  onOpenChange={(next) => {
+                    if (!next && !cancelSubmitting) setCancelModalOpen(false);
+                  }}
+                />
+                <DialogBody>
                   <VStack padding={4} gap={4}>
                     <Text>
                       Bạn có chắc chắn muốn hủy phòng này? Dữ liệu gọi món sẽ bị xóa.
                     </Text>
-                    <HStack gap={2} hAlign="end">
-                      <Button
-                        label="Không"
-                        variant="ghost"
-                        isDisabled={cancelSubmitting}
-                        onClick={() => setCancelModalOpen(false)}
-                      />
-                      <Button
-                        label={cancelSubmitting ? "Đang trả phòng..." : "Đồng ý trả phòng"}
-                        variant="destructive"
-                        isLoading={cancelSubmitting}
-                        isDisabled={cancelSubmitting}
-                        onClick={() => void handleCancelRoom()}
-                      />
-                    </HStack>
                   </VStack>
-                </VStack>
+                </DialogBody>
+                <DialogFooter>
+                  <Button
+                    label="Không"
+                    variant="ghost"
+                    isDisabled={cancelSubmitting}
+                    onClick={() => setCancelModalOpen(false)}
+                  />
+                  <Button
+                    label={cancelSubmitting ? "Đang trả phòng..." : "Đồng ý trả phòng"}
+                    variant="destructive"
+                    isLoading={cancelSubmitting}
+                    isDisabled={cancelSubmitting}
+                    onClick={() => void handleCancelRoom()}
+                  />
+                </DialogFooter>
               </Dialog>
               {checkoutModalOpen && karaoke.currentSession && (
                 <ConfirmBillActionModal

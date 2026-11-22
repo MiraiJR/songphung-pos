@@ -91,10 +91,22 @@ export function Dialog({
   );
 }
 
+export function DialogBody({ children }: { children: ReactNode }) {
+  return <VStack className="app-dialog-body">{children}</VStack>;
+}
+
+export function DialogFooter({ children }: { children: ReactNode }) {
+  return (
+    <HStack className="app-dialog-footer" gap={2} hAlign="end" padding={4}>
+      {children}
+    </HStack>
+  );
+}
+
 export function DialogHeader({ title, subtitle, onOpenChange }: DialogHeaderProps) {
   const titleId = useContext(DialogTitleContext);
   return (
-    <HStack gap={3} vAlign="start" hAlign="between" padding={4}>
+    <HStack className="app-dialog-header" gap={3} vAlign="start" hAlign="between" padding={4}>
       <VStack gap={0.5}>
         <Heading level={2} id={titleId}>
           {title}

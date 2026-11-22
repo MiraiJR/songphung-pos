@@ -1,19 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { DateInput } from "@astryxdesign/core/DateInput";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { Selector } from "@astryxdesign/core/Selector";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import {
@@ -573,14 +572,14 @@ export function HistoryPage({
         return (
           <HStack gap={0.5} hAlign="end" vAlign="center">
             <IconButton
-              label="Xem chi tiết"
-              icon={<Icon icon={Eye} />}
+              label="Chỉnh sửa"
+              icon={<Icon icon={Pencil} />}
               variant="ghost"
               size="sm"
-              isLoading={isRowBusy}
+              isDisabled={isRowBusy}
               onClick={() => {
                 const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
-                if (item) void handleViewDetail(item);
+                if (item) void handleOpenEdit(item);
               }}
             />
             <IconButton
@@ -594,21 +593,6 @@ export function HistoryPage({
                 const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
                 if (item) void requestReprint(item);
               }}
-            />
-            <MoreMenu
-              label="Thêm thao tác"
-              size="sm"
-              alignment="end"
-              items={[
-                {
-                  label: "Chỉnh sửa",
-                  isDisabled: isRowBusy,
-                  onClick: () => {
-                    const item = histories.find((h) => h.lich_su_phong_id === row.lich_su_phong_id);
-                    if (item) void handleOpenEdit(item);
-                  },
-                },
-              ]}
             />
           </HStack>
         );
@@ -841,13 +825,13 @@ export function HistoryPage({
           purpose="info"
           padding={0}
         >
-          <VStack>
-            <DialogHeader
-              title={`Chi tiết hóa đơn #${selectedHistory.lich_su_phong_id}`}
-              onOpenChange={(next) => {
-                if (!next) setDetailOpen(false);
-              }}
-            />
+          <DialogHeader
+            title={`Chi tiết hóa đơn #${selectedHistory.lich_su_phong_id}`}
+            onOpenChange={(next) => {
+              if (!next) setDetailOpen(false);
+            }}
+          />
+          <DialogBody>
             <VStack padding={5} hAlign="center">
               <BillTemplatePreview
                 title="PHIẾU THANH TOÁN"
@@ -869,19 +853,18 @@ export function HistoryPage({
                 size="large"
               />
             </VStack>
-            <Divider />
-            <HStack gap={2} hAlign="end" padding={4}>
-              <Button label="Đóng" variant="ghost" onClick={() => setDetailOpen(false)} />
-              <Button
-                label="Chỉnh sửa"
-                variant="secondary"
-                onClick={() => {
-                  setDetailOpen(false);
-                  void handleOpenEdit(selectedHistory);
-                }}
-              />
-            </HStack>
-          </VStack>
+          </DialogBody>
+          <DialogFooter>
+            <Button label="Đóng" variant="ghost" onClick={() => setDetailOpen(false)} />
+            <Button
+              label="Chỉnh sửa"
+              variant="secondary"
+              onClick={() => {
+                setDetailOpen(false);
+                void handleOpenEdit(selectedHistory);
+              }}
+            />
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -897,16 +880,15 @@ export function HistoryPage({
           purpose="form"
           padding={0}
         >
-          <VStack>
-            <DialogHeader
-              title={`Chỉnh sửa hóa đơn #${editingHistory.lich_su_phong_id}`}
-              subtitle="Sửa tiền giờ, phụ thu, số lượng, thêm món hoặc gỡ món khỏi hóa đơn đã thanh toán."
-              onOpenChange={(next) => {
-                if (!next && !savingEdit) setEditOpen(false);
-              }}
-            />
-
-            <HStack gap={4} padding={5} wrap="wrap" vAlign="start" isScrollable>
+          <DialogHeader
+            title={`Chỉnh sửa hóa đơn #${editingHistory.lich_su_phong_id}`}
+            subtitle="Sửa tiền giờ, phụ thu, số lượng, thêm món hoặc gỡ món khỏi hóa đơn đã thanh toán."
+            onOpenChange={(next) => {
+              if (!next && !savingEdit) setEditOpen(false);
+            }}
+          />
+          <DialogBody>
+            <HStack gap={4} padding={5} wrap="wrap" vAlign="start">
               {/* ---- Left: edit form ---- */}
               <VStack gap={3} width="100%" style={{ flex: 1, minWidth: "24rem" }}>
                 {/* Money inputs */}
@@ -1161,23 +1143,21 @@ export function HistoryPage({
                 />
               </VStack>
             </HStack>
-
-            <Divider />
-            <HStack gap={2} hAlign="end" padding={4}>
-              <Button
-                label="Hủy"
-                variant="ghost"
-                isDisabled={savingEdit}
-                onClick={() => setEditOpen(false)}
-              />
-              <Button
-                label={savingEdit ? "Đang lưu..." : "Lưu chỉnh sửa"}
-                variant="primary"
-                isLoading={savingEdit}
-                onClick={() => void handleSaveEdit()}
-              />
-            </HStack>
-          </VStack>
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              label="Hủy"
+              variant="ghost"
+              isDisabled={savingEdit}
+              onClick={() => setEditOpen(false)}
+            />
+            <Button
+              label={savingEdit ? "Đang lưu..." : "Lưu chỉnh sửa"}
+              variant="primary"
+              isLoading={savingEdit}
+              onClick={() => void handleSaveEdit()}
+            />
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -1188,30 +1168,29 @@ export function HistoryPage({
         width={420}
         purpose="form"
       >
-        <VStack>
-          <DialogHeader title="Xác nhận xóa hóa đơn" onOpenChange={setDeleteIdsDialogOpen} />
+        <DialogHeader title="Xác nhận xóa hóa đơn" onOpenChange={setDeleteIdsDialogOpen} />
+        <DialogBody>
           <VStack gap={3} padding={5}>
             <Text>
               Bạn sắp xóa <Text weight="bold">{selectionState.selectedCount}</Text> hóa đơn đã thanh toán.
               Hành động này không thể hoàn tác. Dữ liệu sau khi xóa sẽ mất vĩnh viễn.
             </Text>
           </VStack>
-          <Divider />
-          <HStack gap={2} hAlign="end" padding={4}>
-            <Button
-              label="Hủy"
-              variant="ghost"
-              isDisabled={deleting}
-              onClick={() => setDeleteIdsDialogOpen(false)}
-            />
-            <Button
-              label={deleting ? "Đang xóa..." : "Xóa"}
-              variant="destructive"
-              isLoading={deleting}
-              onClick={() => void confirmDeleteByIds()}
-            />
-          </HStack>
-        </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            label="Hủy"
+            variant="ghost"
+            isDisabled={deleting}
+            onClick={() => setDeleteIdsDialogOpen(false)}
+          />
+          <Button
+            label={deleting ? "Đang xóa..." : "Xóa"}
+            variant="destructive"
+            isLoading={deleting}
+            onClick={() => void confirmDeleteByIds()}
+          />
+        </DialogFooter>
       </Dialog>
     </VStack>
   );

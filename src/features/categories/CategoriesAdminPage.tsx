@@ -12,7 +12,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { VStack } from "@astryxdesign/core/VStack";
 import { HStack } from "@astryxdesign/core/HStack";
 import { StackItem } from "@astryxdesign/core/Stack";
@@ -269,6 +269,7 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
       {/* Create Group Dialog */}
       <Dialog isOpen={createModalOpen} onOpenChange={setCreateModalOpen} width={520} purpose="form">
         <DialogHeader title="Thêm nhóm sản phẩm" onOpenChange={setCreateModalOpen} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <TextInput
             label="Tên nhóm"
@@ -282,24 +283,25 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
             onChange={(v) => setParentId(v)}
             options={parentSelectorOptions}
           />
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
-            <Button
-              label="Tạo nhóm"
-              variant="primary"
-              clickAction={async () => {
-                if (!tenNhom.trim()) return;
-                await onCreate({
-                  ten_nhom: tenNhom.trim(),
-                  nhom_san_pham_cha_id: parentId ? Number(parentId) : null,
-                });
-                setTenNhom("");
-                setParentId("");
-                setCreateModalOpen(false);
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
+          <Button
+            label="Tạo nhóm"
+            variant="primary"
+            clickAction={async () => {
+              if (!tenNhom.trim()) return;
+              await onCreate({
+                ten_nhom: tenNhom.trim(),
+                nhom_san_pham_cha_id: parentId ? Number(parentId) : null,
+              });
+              setTenNhom("");
+              setParentId("");
+              setCreateModalOpen(false);
+            }}
+          />
+        </DialogFooter>
       </Dialog>
 
       {/* Edit Group Dialog */}
@@ -310,6 +312,7 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
         purpose="form"
       >
         <DialogHeader title="Sửa nhóm sản phẩm" onOpenChange={() => setEditModalOpen(false)} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <TextInput
             label="Tên nhóm"
@@ -328,23 +331,24 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
                 .map((g) => ({ value: String(g.nhom_san_pham_id), label: g.ten_nhom })),
             ]}
           />
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setEditModalOpen(false)} />
-            <Button
-              label="Lưu thay đổi"
-              variant="secondary"
-              clickAction={async () => {
-                if (!editTenNhom.trim() || editingId === null) return;
-                await onUpdate({
-                  nhom_san_pham_id: editingId,
-                  ten_nhom: editTenNhom.trim(),
-                  nhom_san_pham_cha_id: editParentId ? Number(editParentId) : null,
-                });
-                setEditModalOpen(false);
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setEditModalOpen(false)} />
+          <Button
+            label="Lưu thay đổi"
+            variant="secondary"
+            clickAction={async () => {
+              if (!editTenNhom.trim() || editingId === null) return;
+              await onUpdate({
+                nhom_san_pham_id: editingId,
+                ten_nhom: editTenNhom.trim(),
+                nhom_san_pham_cha_id: editParentId ? Number(editParentId) : null,
+              });
+              setEditModalOpen(false);
+            }}
+          />
+        </DialogFooter>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
@@ -355,22 +359,24 @@ export function CategoriesAdminPage({ groups, onCreate, onUpdate, onDelete, onRe
         purpose="required"
       >
         <DialogHeader title="Xác nhận xóa nhóm sản phẩm" onOpenChange={() => { if (!deleting) setDeleteTarget(null); }} />
+        <DialogBody>
         <VStack gap={3} padding={4}>
           <Text type="body">
             Bạn có chắc chắn muốn xóa nhóm{" "}
             <Text weight="semibold">{deleteTarget?.ten_nhom ?? ""}</Text>
             ? Hành động này không thể hoàn tác.
           </Text>
-          <HStack gap={2} justify="end">
-            <Button label="Hủy" variant="ghost" isDisabled={deleting} onClick={() => setDeleteTarget(null)} />
-            <Button
-              label={deleting ? "Đang xóa..." : "Xóa"}
-              variant="destructive"
-              isLoading={deleting}
-              clickAction={async () => { await confirmDeleteGroup(); }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" isDisabled={deleting} onClick={() => setDeleteTarget(null)} />
+          <Button
+            label={deleting ? "Đang xóa..." : "Xóa"}
+            variant="destructive"
+            isLoading={deleting}
+            clickAction={async () => { await confirmDeleteGroup(); }}
+          />
+        </DialogFooter>
       </Dialog>
     </VStack>
   );

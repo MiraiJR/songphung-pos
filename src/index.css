@@ -151,11 +151,31 @@ body {
     display: flex;
     flex-direction: column;
     max-width: 100%;
-    overflow: auto;
+    overflow: hidden;
     border: 1px solid var(--color-brand-border);
     border-radius: 0.75rem;
     background: #ffffff;
     color: var(--color-brand-fg-body);
     box-shadow: 0 20px 50px rgb(15 23 42 / 0.2);
+  }
+
+  .app-dialog-header,
+  .app-dialog-footer {
+    flex-shrink: 0 !important;
+    background: #ffffff;
+  }
+
+  .app-dialog-header {
+    border-bottom: 1px solid var(--color-brand-border);
+  }
+
+  .app-dialog-footer {
+    border-top: 1px solid var(--color-brand-border);
+  }
+
+  .app-dialog-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: auto !important;
   }
 }

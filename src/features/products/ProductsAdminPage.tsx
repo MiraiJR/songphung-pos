@@ -13,7 +13,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { Button } from "@astryxdesign/core/Button";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { VStack } from "@astryxdesign/core/VStack";
 import { HStack } from "@astryxdesign/core/HStack";
 import { StackItem } from "@astryxdesign/core/Stack";
@@ -297,6 +297,7 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
       {/* Create Product Dialog */}
       <Dialog isOpen={createModalOpen} onOpenChange={setCreateModalOpen} width={560} purpose="form">
         <DialogHeader title="Thêm sản phẩm" onOpenChange={setCreateModalOpen} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <HStack gap={2}>
             <StackItem size="fill">
@@ -345,22 +346,23 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
             onChange={(v) => form.setValue("nhom_san_pham_id", v)}
             options={groupSelectorOptions}
           />
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
-            <Button
-              label="Tạo sản phẩm"
-              variant="primary"
-              clickAction={async () => {
-                const data = form.getValues();
-                if (!data.san_pham_id || !data.ten_san_pham || !data.don_vi_tinh || data.don_gia <= 0) return;
-                await onCreate(data);
-                form.reset({ san_pham_id: "", ten_san_pham: "", don_vi_tinh: "", don_gia: 0, nhom_san_pham_id: "" });
-                setCreateDonGiaInput("");
-                setCreateModalOpen(false);
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setCreateModalOpen(false)} />
+          <Button
+            label="Tạo sản phẩm"
+            variant="primary"
+            clickAction={async () => {
+              const data = form.getValues();
+              if (!data.san_pham_id || !data.ten_san_pham || !data.don_vi_tinh || data.don_gia <= 0) return;
+              await onCreate(data);
+              form.reset({ san_pham_id: "", ten_san_pham: "", don_vi_tinh: "", don_gia: 0, nhom_san_pham_id: "" });
+              setCreateDonGiaInput("");
+              setCreateModalOpen(false);
+            }}
+          />
+        </DialogFooter>
       </Dialog>
 
       {/* Edit Product Dialog */}
@@ -371,6 +373,7 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
         purpose="form"
       >
         <DialogHeader title="Sửa sản phẩm" onOpenChange={() => setEditingProduct(null)} />
+        <DialogBody>
         <VStack gap={2} padding={4}>
           <HStack gap={2}>
             <StackItem size="fill">
@@ -412,26 +415,27 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
             onChange={(v) => setEditNhomId(v)}
             options={groupSelectorOptions}
           />
-          <HStack gap={2} justify="end" padding={1}>
-            <Button label="Hủy" variant="ghost" onClick={() => setEditingProduct(null)} />
-            <Button
-              label="Lưu thay đổi"
-              variant="secondary"
-              clickAction={async () => {
-                if (!editingProduct) return;
-                if (!editTenSanPham || !editDonViTinh || Number(editDonGia) <= 0) return;
-                await onUpdate({
-                  san_pham_id: editingProduct.san_pham_id,
-                  ten_san_pham: editTenSanPham,
-                  don_vi_tinh: editDonViTinh,
-                  don_gia: Number(editDonGia),
-                  nhom_san_pham_id: editNhomId || "",
-                });
-                setEditingProduct(null);
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setEditingProduct(null)} />
+          <Button
+            label="Lưu thay đổi"
+            variant="secondary"
+            clickAction={async () => {
+              if (!editingProduct) return;
+              if (!editTenSanPham || !editDonViTinh || Number(editDonGia) <= 0) return;
+              await onUpdate({
+                san_pham_id: editingProduct.san_pham_id,
+                ten_san_pham: editTenSanPham,
+                don_vi_tinh: editDonViTinh,
+                don_gia: Number(editDonGia),
+                nhom_san_pham_id: editNhomId || "",
+              });
+              setEditingProduct(null);
+            }}
+          />
+        </DialogFooter>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
@@ -442,22 +446,24 @@ export function ProductsAdminPage({ products, groups, onCreate, onUpdate, onDele
         purpose="required"
       >
         <DialogHeader title="Xác nhận xóa sản phẩm" onOpenChange={() => { if (!deleting) setDeleteTarget(null); }} />
+        <DialogBody>
         <VStack gap={3} padding={4}>
           <Text type="body">
             Bạn có chắc chắn muốn xóa sản phẩm{" "}
             <Text weight="semibold">{deleteTarget?.ten_san_pham ?? ""}</Text>{" "}
             (<Text type="code">{deleteTarget?.san_pham_id ?? ""}</Text>)? Hành động này không thể hoàn tác.
           </Text>
-          <HStack gap={2} justify="end">
-            <Button label="Hủy" variant="ghost" isDisabled={deleting} onClick={() => setDeleteTarget(null)} />
-            <Button
-              label={deleting ? "Đang xóa..." : "Xóa"}
-              variant="destructive"
-              isLoading={deleting}
-              clickAction={async () => { await confirmDeleteProduct(); }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" isDisabled={deleting} onClick={() => setDeleteTarget(null)} />
+          <Button
+            label={deleting ? "Đang xóa..." : "Xóa"}
+            variant="destructive"
+            isLoading={deleting}
+            clickAction={async () => { await confirmDeleteProduct(); }}
+          />
+        </DialogFooter>
       </Dialog>
     </VStack>
   );

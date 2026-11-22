@@ -10,7 +10,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { Selector } from "@astryxdesign/core/Selector";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { DateInput } from "@astryxdesign/core/DateInput";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/AppDialog";
 import { VStack } from "@astryxdesign/core/VStack";
 import { HStack } from "@astryxdesign/core/HStack";
 import { StackItem } from "@astryxdesign/core/Stack";
@@ -676,37 +676,40 @@ export function PrinterSettingsPage({
         purpose="required"
       >
         <DialogHeader title="Xác nhận xóa QR" onOpenChange={() => setDeleteQrTarget(null)} />
+        <DialogBody>
         <VStack gap={3} padding={4}>
           <Text type="body">
             Bạn có chắc muốn xóa QR{" "}
             <Text weight="semibold">&quot;{deleteQrTarget?.qr_thanh_toan_ten}&quot;</Text>?
           </Text>
-          <HStack gap={2} justify="end">
-            <Button label="Hủy" variant="ghost" onClick={() => setDeleteQrTarget(null)} />
-            <Button
-              label="Xóa"
-              variant="destructive"
-              clickAction={async () => {
-                if (!deleteQrTarget) return;
-                try {
-                  await invoke("delete_qr_thanh_toan", {
-                    qrThanhToanId: deleteQrTarget.qr_thanh_toan_id,
-                  });
-                  showToast({ body: "Đã xóa QR." });
-                  setDeleteQrTarget(null);
-                  await loadQrList();
-                  await reloadQrPreview();
-                } catch (error) {
-                  showToast({ body: String(error), type: "error" });
-                }
-              }}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" onClick={() => setDeleteQrTarget(null)} />
+          <Button
+            label="Xóa"
+            variant="destructive"
+            clickAction={async () => {
+              if (!deleteQrTarget) return;
+              try {
+                await invoke("delete_qr_thanh_toan", {
+                  qrThanhToanId: deleteQrTarget.qr_thanh_toan_id,
+                });
+                showToast({ body: "Đã xóa QR." });
+                setDeleteQrTarget(null);
+                await loadQrList();
+                await reloadQrPreview();
+              } catch (error) {
+                showToast({ body: String(error), type: "error" });
+              }
+            }}
+          />
+        </DialogFooter>
       </Dialog>
 
       <Dialog isOpen={cleanupOpen} onOpenChange={setCleanupOpen} width={460} purpose="required">
         <DialogHeader title="Xác nhận dọn dẹp" onOpenChange={setCleanupOpen} />
+        <DialogBody>
         <VStack gap={3} padding={4}>
           <Text>{cleanupChoice.detail}</Text>
           {cleanupMode === "paid_range" ? (
@@ -715,16 +718,17 @@ export function PrinterSettingsPage({
             </Text>
           ) : null}
           <Text color="secondary">Thao tác này không hoàn tác được.</Text>
-          <HStack gap={2} justify="end">
-            <Button label="Hủy" variant="ghost" isDisabled={cleaning} onClick={() => setCleanupOpen(false)} />
-            <Button
-              label="Xóa"
-              variant="destructive"
-              isLoading={cleaning}
-              onClick={() => void runCleanup()}
-            />
-          </HStack>
         </VStack>
+        </DialogBody>
+        <DialogFooter>
+          <Button label="Hủy" variant="ghost" isDisabled={cleaning} onClick={() => setCleanupOpen(false)} />
+          <Button
+            label="Xóa"
+            variant="destructive"
+            isLoading={cleaning}
+            onClick={() => void runCleanup()}
+          />
+        </DialogFooter>
       </Dialog>
     </VStack>
   );

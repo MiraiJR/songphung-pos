@@ -3,7 +3,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
-import { Dialog, DialogHeader } from "@/components/AppDialog";
+import { Dialog, DialogBody, DialogHeader } from "@/components/AppDialog";
 import { Divider } from "@astryxdesign/core/Divider";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -176,8 +176,8 @@ export function PosPage(props: Props) {
 
   // Keep CSS grid for the 3-column POS frame (proven stable). Astryx for chrome inside.
   return (
-    <section className="grid h-[calc(100vh-64px)] grid-cols-10 gap-3 overflow-hidden bg-[var(--color-background-wash,#f4f7f9)] p-3">
-      <div className="col-span-3 min-h-0">
+    <section className="grid h-[calc(100vh-64px)] grid-cols-[9fr_7fr_4fr] gap-3 overflow-hidden bg-[var(--color-background-wash,#f4f7f9)] p-3">
+      <div className="min-h-0">
       <Card elevation="low" padding={0} height="100%">
         <VStack height="100%">
           <VStack padding={3} gap={1}>
@@ -203,33 +203,40 @@ export function PosPage(props: Props) {
                   <Text color="secondary">Chưa gọi món. Bấm món bên phải để thêm một.</Text>
                 ) : null}
                 {currentSession?.items.map((item) => (
-                  <HStack key={item.lich_su_phong_san_pham_id} gap={1} vAlign="center">
-                    <StackItem size="fill">
+                  <HStack key={item.lich_su_phong_san_pham_id} gap={2} vAlign="center">
+                    <StackItem size="fill" style={{ minWidth: 0 }}>
                       <Text weight="medium" maxLines={1}>
                         {item.ten_san_pham}
                       </Text>
                     </StackItem>
-                    <Button
-                      label="−"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => onAdjustItemQty(item, -1)}
-                    />
-                    <Button
-                      label={String(item.so_luong)}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onEditItem(item)}
-                    />
-                    <Button
-                      label="+"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => onAdjustItemQty(item, 1)}
-                    />
-                    <Text weight="semibold" hasTabularNumbers>
-                      {Math.round(item.thanh_tien).toLocaleString("vi-VN")}
-                    </Text>
+                    <HStack gap={1} vAlign="center" width={148} hAlign="end">
+                      <Button
+                        label="−"
+                        size="sm"
+                        variant="secondary"
+                        width={36}
+                        onClick={() => onAdjustItemQty(item, -1)}
+                      />
+                      <Button
+                        label={String(item.so_luong)}
+                        size="sm"
+                        variant="ghost"
+                        width={56}
+                        onClick={() => onEditItem(item)}
+                      />
+                      <Button
+                        label="+"
+                        size="sm"
+                        variant="secondary"
+                        width={36}
+                        onClick={() => onAdjustItemQty(item, 1)}
+                      />
+                    </HStack>
+                    <VStack width={128} hAlign="end">
+                      <Text weight="semibold" hasTabularNumbers>
+                        {Math.round(item.thanh_tien).toLocaleString("vi-VN")}
+                      </Text>
+                    </VStack>
                   </HStack>
                 ))}
               </VStack>
@@ -340,7 +347,7 @@ export function PosPage(props: Props) {
       </Card>
       </div>
 
-      <div className="col-span-4 flex min-h-0 flex-col gap-3">
+      <div className="flex min-h-0 flex-col gap-3">
         <Card elevation="low" padding={3}>
           <VStack gap={2}>
             <TextInput
@@ -395,7 +402,7 @@ export function PosPage(props: Props) {
         </div>
       </div>
 
-      <div className="col-span-3 min-h-0">
+      <div className="min-h-0">
       <Card elevation="low" padding={0} height="100%">
         <VStack height="100%">
           <VStack padding={3} gap={0}>
@@ -434,8 +441,7 @@ export function PosPage(props: Props) {
         purpose="form"
         padding={0}
       >
-        <VStack>
-          <DialogHeader
+        <DialogHeader
             title="Chuyển phòng"
             subtitle={
               selectedRoom
@@ -446,6 +452,7 @@ export function PosPage(props: Props) {
               if (!next && !transferSubmitting) setTransferModalOpen(false);
             }}
           />
+          <DialogBody>
           <VStack padding={4} gap={2}>
             {emptyRoomsForTransfer.length === 0 ? (
               <EmptyState
@@ -488,7 +495,7 @@ export function PosPage(props: Props) {
               </VStack>
             )}
           </VStack>
-        </VStack>
+          </DialogBody>
       </Dialog>
     </section>
   );
