@@ -176,178 +176,184 @@ export function PosPage(props: Props) {
 
   // Keep CSS grid for the 3-column POS frame (proven stable). Astryx for chrome inside.
   return (
-    <section className="grid h-[calc(100vh-64px)] grid-cols-[9fr_7fr_4fr] gap-3 overflow-hidden bg-[var(--color-background-wash,#f4f7f9)] p-3">
-      <div className="min-h-0">
-      <Card elevation="low" padding={0} height="100%">
-        <VStack height="100%">
-          <VStack padding={3} gap={1}>
-            <HStack hAlign="between" vAlign="start">
-              <Heading level={2}>{selectedRoom ? selectedRoom.ten_phong : "--"}</Heading>
-              <Text size="2xs" color="secondary">
-                Bắt đầu: {formatDateTime(currentSession?.gio_bat_dau)}
-              </Text>
-            </HStack>
-            {selectedRoom && (
-              <Badge
-                variant={selectedRoom.trang_thai === "TRONG" ? "warning" : "success"}
-                label={ROOM_STATUS_LABEL[selectedRoom.trang_thai]}
-              />
+    <section className="grid h-[calc(100vh-64px)] grid-cols-[minmax(0,7fr)_minmax(0,9fr)_minmax(0,4fr)] gap-3 overflow-hidden bg-[var(--color-background-wash,#f4f7f9)] p-3">
+      <div className="min-h-0 min-w-0 overflow-hidden">
+        <Card elevation="low" padding={0} height="100%">
+          <VStack height="100%">
+            <VStack padding={3} gap={1}>
+              <HStack hAlign="between" vAlign="start">
+                <Heading level={2}>{selectedRoom ? selectedRoom.ten_phong : "--"}</Heading>
+                <Text size="2xs" color="secondary">
+                  Bắt đầu: {formatDateTime(currentSession?.gio_bat_dau)}
+                </Text>
+              </HStack>
+              {selectedRoom && (
+                <Badge
+                  variant={selectedRoom.trang_thai === "TRONG" ? "warning" : "success"}
+                  label={ROOM_STATUS_LABEL[selectedRoom.trang_thai]}
+                />
+              )}
+            </VStack>
+            <Divider />
+
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ScrollableArea label="Món đã gọi" height="100%" padding={3}>
+                <VStack gap={2}>
+                  {currentSession && currentSession.items.length === 0 ? (
+                    <Text color="secondary">Chưa gọi món. Bấm món bên phải để thêm một.</Text>
+                  ) : null}
+                  {currentSession?.items.map((item) => (
+                    <HStack key={item.lich_su_phong_san_pham_id} gap={2} vAlign="center" width="100%" style={{ minWidth: 0 }}>
+                      <StackItem size="fill" style={{ minWidth: 0 }}>
+                        <Text weight="medium" maxLines={1}>
+                          {item.ten_san_pham}
+                        </Text>
+                      </StackItem>
+                      <HStack gap={1} vAlign="center" width={148} hAlign="end">
+                        <Button
+                          label="−"
+                          size="sm"
+                          variant="secondary"
+                          width={36}
+                          onClick={() => onAdjustItemQty(item, -1)}
+                        />
+                        <Button
+                          label={String(item.so_luong)}
+                          size="sm"
+                          variant="ghost"
+                          width={56}
+                          onClick={() => onEditItem(item)}
+                        />
+                        <Button
+                          label="+"
+                          size="sm"
+                          variant="secondary"
+                          width={36}
+                          onClick={() => onAdjustItemQty(item, 1)}
+                        />
+                      </HStack>
+                      <VStack width={128} hAlign="end">
+                        <Text weight="semibold" hasTabularNumbers>
+                          {Math.round(item.thanh_tien).toLocaleString("vi-VN")}
+                        </Text>
+                      </VStack>
+                    </HStack>
+                  ))}
+                </VStack>
+              </ScrollableArea>
+            </div>
+
+            {selectedRoom?.trang_thai === "TRONG" && (
+              <>
+                <Divider />
+                <VStack padding={3}>
+                  <Button
+                    label="Mở phòng"
+                    variant="primary"
+                    size="lg"
+                    width="100%"
+                    isLoading={startingRoom}
+                    onClick={() => {
+                      setStartingRoom(true);
+                      void Promise.resolve(onStartRoom(selectedRoom.phong_id)).finally(() => setStartingRoom(false));
+                    }}
+                  />
+                </VStack>
+              </>
+            )}
+
+            {selectedRoom?.trang_thai === "DANG_HOAT_DONG" && (
+              <>
+                <Divider />
+                <VStack padding={3} gap={2}>
+                  <VStack gap={0.5}>
+                    <HStack hAlign="between">
+                      <Text color="secondary" size="sm">
+                        Tổng giờ
+                      </Text>
+                      <Text weight="semibold" size="sm">
+                        {totalDurationLabel}
+                      </Text>
+                    </HStack>
+                    <HStack hAlign="between">
+                      <Text color="secondary" size="sm">
+                        Tiền món
+                      </Text>
+                      <Text weight="semibold" size="sm" hasTabularNumbers>
+                        {tongTienMonDisplay.toLocaleString()}
+                      </Text>
+                    </HStack>
+                    <HStack hAlign="between">
+                      <Text color="secondary" size="sm">
+                        Tiền giờ
+                      </Text>
+                      <Text weight="semibold" size="sm" hasTabularNumbers>
+                        {tongTienGioDisplay.toLocaleString()}
+                      </Text>
+                    </HStack>
+                  </VStack>
+                  <HStack hAlign="between" vAlign="end" width="100%" style={{ minWidth: 0 }}>
+                    <Text weight="bold">Tổng cộng</Text>
+                    <Text
+                      type="display-3"
+                      weight="bold"
+                      color="accent"
+                      hasTabularNumbers
+                      style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      {tongCongDisplay.toLocaleString()}
+                    </Text>
+                  </HStack>
+
+                  {currentSession ? (
+                    <VStack gap={1}>
+                      <Button
+                        label="Thanh toán"
+                        variant="secondary"
+                        className="btn-pay"
+                        size="lg"
+                        width="100%"
+                        isLoading={checkoutLoading}
+                        isDisabled={actionBusy}
+                        onClick={onCheckout}
+                      />
+                      <HStack gap={1}>
+                        <Button
+                          label="In phiếu"
+                          variant="secondary"
+                          width="100%"
+                          isLoading={printTemporaryBillLoading}
+                          isDisabled={actionBusy}
+                          onClick={() => void onPrintTemporaryBill()}
+                        />
+                        <Button
+                          label="Trả phòng"
+                          variant="destructive"
+                          width="100%"
+                          isLoading={cancelLoading}
+                          isDisabled={actionBusy}
+                          onClick={onCancelRoom}
+                        />
+                      </HStack>
+                      <Button
+                        label="Chuyển phòng"
+                        variant="ghost"
+                        width="100%"
+                        isDisabled={actionBusy}
+                        onClick={() => setTransferModalOpen(true)}
+                      />
+                    </VStack>
+                  ) : (
+                    <Text color="secondary">Đang tải phiên phòng...</Text>
+                  )}
+                </VStack>
+              </>
             )}
           </VStack>
-          <Divider />
-
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <ScrollableArea label="Món đã gọi" height="100%" padding={3}>
-              <VStack gap={2}>
-                {currentSession && currentSession.items.length === 0 ? (
-                  <Text color="secondary">Chưa gọi món. Bấm món bên phải để thêm một.</Text>
-                ) : null}
-                {currentSession?.items.map((item) => (
-                  <HStack key={item.lich_su_phong_san_pham_id} gap={2} vAlign="center">
-                    <StackItem size="fill" style={{ minWidth: 0 }}>
-                      <Text weight="medium" maxLines={1}>
-                        {item.ten_san_pham}
-                      </Text>
-                    </StackItem>
-                    <HStack gap={1} vAlign="center" width={148} hAlign="end">
-                      <Button
-                        label="−"
-                        size="sm"
-                        variant="secondary"
-                        width={36}
-                        onClick={() => onAdjustItemQty(item, -1)}
-                      />
-                      <Button
-                        label={String(item.so_luong)}
-                        size="sm"
-                        variant="ghost"
-                        width={56}
-                        onClick={() => onEditItem(item)}
-                      />
-                      <Button
-                        label="+"
-                        size="sm"
-                        variant="secondary"
-                        width={36}
-                        onClick={() => onAdjustItemQty(item, 1)}
-                      />
-                    </HStack>
-                    <VStack width={128} hAlign="end">
-                      <Text weight="semibold" hasTabularNumbers>
-                        {Math.round(item.thanh_tien).toLocaleString("vi-VN")}
-                      </Text>
-                    </VStack>
-                  </HStack>
-                ))}
-              </VStack>
-            </ScrollableArea>
-          </div>
-
-          {selectedRoom?.trang_thai === "TRONG" && (
-            <>
-              <Divider />
-              <VStack padding={3}>
-                <Button
-                  label="Mở phòng"
-                  variant="primary"
-                  size="lg"
-                  width="100%"
-                  isLoading={startingRoom}
-                  onClick={() => {
-                    setStartingRoom(true);
-                    void Promise.resolve(onStartRoom(selectedRoom.phong_id)).finally(() => setStartingRoom(false));
-                  }}
-                />
-              </VStack>
-            </>
-          )}
-
-          {selectedRoom?.trang_thai === "DANG_HOAT_DONG" && (
-            <>
-              <Divider />
-              <VStack padding={3} gap={2}>
-                <VStack gap={0.5}>
-                  <HStack hAlign="between">
-                    <Text color="secondary" size="sm">
-                      Tổng giờ
-                    </Text>
-                    <Text weight="semibold" size="sm">
-                      {totalDurationLabel}
-                    </Text>
-                  </HStack>
-                  <HStack hAlign="between">
-                    <Text color="secondary" size="sm">
-                      Tiền món
-                    </Text>
-                    <Text weight="semibold" size="sm" hasTabularNumbers>
-                      {tongTienMonDisplay.toLocaleString()}
-                    </Text>
-                  </HStack>
-                  <HStack hAlign="between">
-                    <Text color="secondary" size="sm">
-                      Tiền giờ
-                    </Text>
-                    <Text weight="semibold" size="sm" hasTabularNumbers>
-                      {tongTienGioDisplay.toLocaleString()}
-                    </Text>
-                  </HStack>
-                </VStack>
-                <HStack hAlign="between" vAlign="end">
-                  <Text weight="bold">Tổng cộng</Text>
-                  <Text type="display-3" weight="bold" color="accent" hasTabularNumbers>
-                    {tongCongDisplay.toLocaleString()}
-                  </Text>
-                </HStack>
-
-                {currentSession ? (
-                  <VStack gap={1}>
-                    <Button
-                      label="Thanh toán"
-                      variant="secondary"
-                      className="btn-pay"
-                      size="lg"
-                      width="100%"
-                      isLoading={checkoutLoading}
-                      isDisabled={actionBusy}
-                      onClick={onCheckout}
-                    />
-                    <HStack gap={1}>
-                      <Button
-                        label="In phiếu"
-                        variant="secondary"
-                        width="100%"
-                        isLoading={printTemporaryBillLoading}
-                        isDisabled={actionBusy}
-                        onClick={() => void onPrintTemporaryBill()}
-                      />
-                      <Button
-                        label="Trả phòng"
-                        variant="destructive"
-                        width="100%"
-                        isLoading={cancelLoading}
-                        isDisabled={actionBusy}
-                        onClick={onCancelRoom}
-                      />
-                    </HStack>
-                    <Button
-                      label="Chuyển phòng"
-                      variant="ghost"
-                      width="100%"
-                      isDisabled={actionBusy}
-                      onClick={() => setTransferModalOpen(true)}
-                    />
-                  </VStack>
-                ) : (
-                  <Text color="secondary">Đang tải phiên phòng...</Text>
-                )}
-              </VStack>
-            </>
-          )}
-        </VStack>
-      </Card>
+        </Card>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden">
         <Card elevation="low" padding={3}>
           <VStack gap={2}>
             <TextInput
@@ -402,34 +408,34 @@ export function PosPage(props: Props) {
         </div>
       </div>
 
-      <div className="min-h-0">
-      <Card elevation="low" padding={0} height="100%">
-        <VStack height="100%">
-          <VStack padding={3} gap={0}>
-            <Heading level={3}>Phòng ({rooms.length})</Heading>
-          </VStack>
-          <Divider />
-          <ScrollableArea label="Danh sách phòng" height="100%" padding={3}>
-            <VStack gap={2}>
-              {rooms.map((room) => (
-                <ClickableCard
-                  key={room.phong_id}
-                  label={room.ten_phong}
-                  elevation={selectedRoomId === room.phong_id ? "med" : "low"}
-                  variant={room.trang_thai === "TRONG" ? "default" : "green"}
-                  padding={3}
-                  onClick={() => onSelectRoom(room.phong_id)}
-                  onDoubleClick={() => {
-                    if (room.trang_thai === "TRONG") void onStartRoom(room.phong_id);
-                  }}
-                >
-                  <RoomTile room={room} now={now} />
-                </ClickableCard>
-              ))}
+      <div className="min-h-0 min-w-0 overflow-hidden">
+        <Card elevation="low" padding={0} height="100%">
+          <VStack height="100%">
+            <VStack padding={3} gap={0}>
+              <Heading level={3}>Phòng ({rooms.length})</Heading>
             </VStack>
-          </ScrollableArea>
-        </VStack>
-      </Card>
+            <Divider />
+            <ScrollableArea label="Danh sách phòng" height="100%" padding={3}>
+              <VStack gap={2}>
+                {rooms.map((room) => (
+                  <ClickableCard
+                    key={room.phong_id}
+                    label={room.ten_phong}
+                    elevation={selectedRoomId === room.phong_id ? "med" : "low"}
+                    variant={room.trang_thai === "TRONG" ? "default" : "green"}
+                    padding={3}
+                    onClick={() => onSelectRoom(room.phong_id)}
+                    onDoubleClick={() => {
+                      if (room.trang_thai === "TRONG") void onStartRoom(room.phong_id);
+                    }}
+                  >
+                    <RoomTile room={room} now={now} />
+                  </ClickableCard>
+                ))}
+              </VStack>
+            </ScrollableArea>
+          </VStack>
+        </Card>
       </div>
 
       <Dialog
@@ -442,17 +448,17 @@ export function PosPage(props: Props) {
         padding={0}
       >
         <DialogHeader
-            title="Chuyển phòng"
-            subtitle={
-              selectedRoom
-                ? `Đang hát tại ${selectedRoom.ten_phong}. Bấm phòng trống để chuyển phiên và món.`
-                : "Bấm phòng trống để chuyển phiên và món."
-            }
-            onOpenChange={(next) => {
-              if (!next && !transferSubmitting) setTransferModalOpen(false);
-            }}
-          />
-          <DialogBody>
+          title="Chuyển phòng"
+          subtitle={
+            selectedRoom
+              ? `Đang hát tại ${selectedRoom.ten_phong}. Bấm phòng trống để chuyển phiên và món.`
+              : "Bấm phòng trống để chuyển phiên và món."
+          }
+          onOpenChange={(next) => {
+            if (!next && !transferSubmitting) setTransferModalOpen(false);
+          }}
+        />
+        <DialogBody>
           <VStack padding={4} gap={2}>
             {emptyRoomsForTransfer.length === 0 ? (
               <EmptyState
@@ -495,7 +501,7 @@ export function PosPage(props: Props) {
               </VStack>
             )}
           </VStack>
-          </DialogBody>
+        </DialogBody>
       </Dialog>
     </section>
   );
