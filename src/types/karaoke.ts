@@ -1,4 +1,4 @@
-export type Page = "pos" | "rooms" | "products" | "history";
+export type Page = "pos" | "rooms" | "products" | "history" | "stats";
 
 export type Room = {
   phong_id: number;

@@ -89,13 +89,6 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
     out
 }
 
-pub fn line_two_cols(left: &str, right: &str) -> String {
-    let half = RECEIPT_WIDTH / 2;
-    let l: String = left.chars().take(half).collect();
-    let r: String = right.chars().take(half).collect();
-    format!("{:<half$}{:>half$}\n", l, r, half = half)
-}
-
 /// Payment summary line — printed with LARGE font.
 /// Uses `@@LARGE@@` prefix so the print script switches to bigger font.
 pub fn line_total(label: &str, value: &str) -> String {

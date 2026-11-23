@@ -17,6 +17,7 @@ import { ConfirmBillActionModal } from "@/components/billing/ConfirmBillActionMo
 import { Toaster } from "@/components/ui/sonner";
 import { CategoriesAdminPage } from "./features/categories/CategoriesAdminPage";
 import { HistoryPage } from "@/features/history/HistoryPage";
+import { StatsPage } from "@/features/stats/StatsPage";
 import { PosPage } from "@/features/pos/PosPage";
 import { ProductsAdminPage } from "@/features/products/ProductsAdminPage";
 import { RoomsAdminPage } from "@/features/rooms/RoomsAdminPage";
@@ -399,7 +400,6 @@ function SongPhungShell() {
           roomName: s.ten_phong,
           gioBatDau: s.gio_bat_dau,
           gioHienTai: gio_hien_tai,
-          lichSuPhongId: s.lich_su_phong_id,
           items: s.items.map((row) => ({
             tenSanPham: row.ten_san_pham,
             soLuong: row.so_luong,
@@ -1263,6 +1263,7 @@ function SongPhungShell() {
             />
           }
         />
+        <Route path="/admin/stats" element={<StatsPage />} />
         <Route
           path="/admin/settings"
           element={

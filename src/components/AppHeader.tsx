@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { label: "Sản phẩm", to: "/admin/products" },
   { label: "Nhóm Sản phẩm", to: "/admin/categories" },
   { label: "Lịch sử", to: "/admin/history" },
+  { label: "Thống kê", to: "/admin/stats" },
   { label: "Cài đặt", to: "/admin/settings" },
 ] as const;
 

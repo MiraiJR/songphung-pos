@@ -206,8 +206,6 @@ pub struct TemporaryBillData {
     pub gio_bat_dau: String,
     #[serde(alias = "gio_hien_tai")]
     pub gio_hien_tai: String,
-    #[serde(alias = "lich_su_phong_id")]
-    pub lich_su_phong_id: i64,
     pub items: Vec<TemporaryBillLine>,
     #[serde(alias = "tong_tien_san_pham")]
     pub tong_tien_san_pham: f64,
@@ -1317,7 +1315,6 @@ pub async fn cancel_room(
 
 #[tauri::command]
 pub async fn checkout_room(
-    app: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     payload: CheckoutPayload,
 ) -> Result<(), String> {
@@ -1471,7 +1468,7 @@ pub async fn get_current_session(
          FROM lich_su_phong_san_pham ct
          JOIN san_pham sp ON sp.san_pham_id = ct.san_pham_id
          WHERE ct.lich_su_phong_id = ?
-         ORDER BY sp.ten_san_pham",
+         ORDER BY ct.lich_su_phong_san_pham_id",
     )
     .bind(history_id)
     .fetch_all(pool)
@@ -1958,4 +1955,119 @@ pub async fn cleanup_room_data(
 
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(format!("Đã xóa {deleted} bản ghi phòng hát."))
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RevenueClockRow {
+    nam: i64,
+    hom_nay: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RevenueYearRow {
+    tong_doanh_thu_nam: f64,
+    tong_tien_gio_nam: f64,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct RevenueDay {
+    pub ngay: String,
+    pub doanh_thu: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RevenueStats {
+    pub nam: i64,
+    pub hom_nay: String,
+    pub tong_doanh_thu_nam: f64,
+    pub tong_tien_gio_nam: f64,
+    pub ngay: Vec<RevenueDay>,
+}
+
+fn revenue_date_pair(start_date: &str, end_date: &str) -> Result<(String, String), String> {
+    fn is_ymd(value: &str) -> bool {
+        let bytes = value.as_bytes();
+        bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    }
+    if !is_ymd(start_date) || !is_ymd(end_date) {
+        return Err("Ngày không hợp lệ. Dùng định dạng YYYY-MM-DD.".to_string());
+    }
+    if start_date <= end_date {
+        Ok((start_date.to_string(), end_date.to_string()))
+    } else {
+        Ok((end_date.to_string(), start_date.to_string()))
+    }
+}
+
+#[tauri::command]
+pub async fn get_revenue_stats(
+    state: tauri::State<'_, DbState>,
+    start_date: String,
+    end_date: String,
+) -> Result<RevenueStats, String> {
+    let (from, to) = revenue_date_pair(&start_date, &end_date)?;
+    let pool = state.pool();
+    let span: i64 = sqlx::query_scalar("SELECT CAST(julianday(?) - julianday(?) AS INTEGER)")
+        .bind(&to)
+        .bind(&from)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if span < 0 {
+        return Err("Ngày không hợp lệ.".to_string());
+    }
+    if span > 92 {
+        return Err("Khoảng ngày tối đa 93 ngày. Chọn một tháng hoặc thu hẹp khoảng ngày.".to_string());
+    }
+
+    let clock = sqlx::query_as::<_, RevenueClockRow>(
+        "SELECT CAST(strftime('%Y', 'now', 'localtime') AS INTEGER) AS nam,
+                date('now', 'localtime') AS hom_nay",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let year = sqlx::query_as::<_, RevenueYearRow>(
+        "SELECT CAST(COALESCE(SUM(tong_tien_thanh_toan), 0) AS REAL) AS tong_doanh_thu_nam,
+                CAST(COALESCE(SUM(tong_tien_gio), 0) AS REAL) AS tong_tien_gio_nam
+         FROM lich_su_phong
+         WHERE trang_thai = 'DA_THANH_TOAN'
+           AND gio_ket_thuc IS NOT NULL
+           AND strftime('%Y', gio_ket_thuc) = strftime('%Y', 'now', 'localtime')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let ngay = sqlx::query_as::<_, RevenueDay>(
+        "SELECT date(gio_ket_thuc) AS ngay,
+                CAST(COALESCE(SUM(tong_tien_thanh_toan), 0) AS REAL) AS doanh_thu
+         FROM lich_su_phong
+         WHERE trang_thai = 'DA_THANH_TOAN'
+           AND gio_ket_thuc IS NOT NULL
+           AND date(gio_ket_thuc) >= date(?)
+           AND date(gio_ket_thuc) <= date(?)
+         GROUP BY date(gio_ket_thuc)
+         ORDER BY ngay",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(RevenueStats {
+        nam: clock.nam,
+        hom_nay: clock.hom_nay,
+        tong_doanh_thu_nam: year.tong_doanh_thu_nam,
+        tong_tien_gio_nam: year.tong_tien_gio_nam,
+        ngay,
+    })
 }

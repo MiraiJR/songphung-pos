@@ -2,7 +2,6 @@ mod bill_qr;
 mod commands;
 mod csv_import;
 mod database;
-mod models;
 mod printer;
 
 use database::DbState;
@@ -54,6 +53,7 @@ pub fn run() {
             commands::reprint_history_bill,
             commands::get_current_session,
             commands::list_paid_history,
+            commands::get_revenue_stats,
             commands::get_history_order_items,
             commands::update_paid_history_bill,
             commands::delete_history_by_ids,
